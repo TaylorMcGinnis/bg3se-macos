@@ -101,10 +101,13 @@ static int persist_session_live(void) {
            s == SERVER_STATE_SAVE || s == SERVER_STATE_SYNC;
 }
 
-/* "{}" (and whitespace variants) — an empty table serialized. */
+/* "{}" (and whitespace variants) — an empty table serialized. "null" counts
+ * too: it is what the stringifier emits for anything it cannot serialize, and
+ * it must never replace a file that holds real data. */
 static int persist_json_is_empty(const char *json) {
     if (!json) return 1;
     while (*json == ' ' || *json == '\n' || *json == '\t' || *json == '\r') json++;
+    if (strncmp(json, "null", 4) == 0) return 1;
     if (*json != '{' && *json != '[') return 0;
     char close = (*json == '{') ? '}' : ']';
     json++;
@@ -351,6 +354,16 @@ void persist_restore_all(lua_State *L) {
             continue;
         }
 
+        // A "null" file is what the placeholder bug left behind (v0.47.2 and
+        // earlier); there is nothing in it to restore, so it is not an error.
+        const char *p = json;
+        while (*p == ' ' || *p == '\n' || *p == '\t' || *p == '\r') p++;
+        if (strncmp(p, "null", 4) == 0) {
+            LOG_PERSIST_INFO("Nothing stored for %s (empty store file)", modtable);
+            free(json);
+            continue;
+        }
+
         // Parse JSON
         const char *result = json_parse_value(L, json);
         if (!result || !lua_istable(L, -1)) {
@@ -430,10 +443,16 @@ void persist_save_all(lua_State *L) {
             continue;
         }
 
-        // Stringify PersistentVars
+        // Stringify PersistentVars. The index is taken BEFORE luaL_buffinit:
+        // Lua 5.4 pushes a placeholder slot for the buffer, so lua_gettop()
+        // afterwards names that light userdata, which stringifies as "null".
+        // That is what every file in the store held for two weeks — a 4-byte
+        // "null" that the restore then rejected, so mods started from empty
+        // vars on every load (TransmogEnhanced re-granted its control items).
+        int vars_idx = lua_gettop(L);
         luaL_Buffer b;
         luaL_buffinit(L, &b);
-        json_stringify_value(L, lua_gettop(L), &b);
+        json_stringify_value(L, vars_idx, &b);
         luaL_pushresult(&b);
 
         const char *json = lua_tostring(L, -1);

@@ -42,12 +42,17 @@ int lua_ext_print(lua_State *L) {
     luaL_Buffer b;
     luaL_buffinit(L, &b);
 
+    // luaL_addvalue is the one buffer operation allowed with an extra value on
+    // the stack (it pops it into the buffer). Appending the luaL_tolstring
+    // result by pointer while it was still on the stack broke the buffer's
+    // stack contract: once a print outgrows the 1 KB inline buffer, the growth
+    // path removes the string instead of the buffer placeholder and the pop
+    // that followed closed the freshly created box — a heap corruption for any
+    // print() over 1 KB (print(Ext.DumpExport(bigTable)) does that routinely).
     for (int i = 1; i <= n; i++) {
-        size_t len;
-        const char *s = luaL_tolstring(L, i, &len);
         if (i > 1) luaL_addchar(&b, '\t');
-        luaL_addlstring(&b, s, len);
-        lua_pop(L, 1);  // pop the string from luaL_tolstring
+        luaL_tolstring(L, i, NULL);
+        luaL_addvalue(&b);
     }
 
     luaL_pushresult(&b);

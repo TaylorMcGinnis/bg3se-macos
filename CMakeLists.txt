@@ -399,6 +399,7 @@ if(BUILD_TESTS)
         tests/tier0/test_mod_paths.c
         tests/tier0/test_lua_runtime.c
         tests/tier0/test_guid_lookup.c
+        tests/tier0/test_persistentvars.c
         tests/tier0/stub_logging.c
         src/core/safe_memory.c
         src/entity/guid_lookup.c
@@ -406,6 +407,8 @@ if(BUILD_TESTS)
         src/mod/mod_paths.c
         src/lua/lua_runtime.c
         src/lua/lua_context.c
+        src/lua/lua_json.c
+        src/lua/lua_persistentvars.c
     )
     target_include_directories(bg3se_test_tier0 PRIVATE
         ${CMAKE_SOURCE_DIR}/tests/tier0

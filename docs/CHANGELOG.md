@@ -2,6 +2,23 @@
 
 All notable changes to BG3SE-macOS are documented here.
 
+## Unreleased
+
+- **PersistentVars actually persist.** Every file in
+  `~/Library/Application Support/BG3SE/persistentvars/` was the 4-byte `null`:
+  `persist_save_all()` took `lua_gettop()` *after* `luaL_buffinit()`, which in
+  Lua 5.4 pushes a buffer placeholder, so it serialized that light userdata
+  instead of the mod's table — and the restore rejected `null` on the next
+  load. Mods therefore started from empty vars every session (TransmogEnhanced
+  granted its control items again on each load). The index is now taken first;
+  `null` can no longer overwrite a store file and an old `null` file is ignored
+  quietly. Tier 0 round-trip test added (fails on the old code).
+- **`print()` over 1 KB corrupted the heap.** The luaL_Buffer was appended to
+  while the `luaL_tolstring` result sat on the stack; once the buffer outgrew
+  its inline 1 KB the growth path removed the string instead of the placeholder
+  and the following pop closed the new box. `luaL_addvalue` now does the
+  append.
+
 ## v0.47.2 (2026-09-05)
 
 - **Crash fix — mod timers racing the server.** The console/timer poll thread
