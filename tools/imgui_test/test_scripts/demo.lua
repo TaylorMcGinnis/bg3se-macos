@@ -40,10 +40,11 @@ input.OnChange = function(widget)
 end
 
 -- Combo Box
-local combo = win:AddCombo("Class", {"Fighter", "Wizard", "Rogue", "Cleric"}, 1)
+local combo = win:AddCombo("Class", {"Fighter", "Wizard", "Rogue", "Cleric"}, 0)
 combo.OnChange = function(widget)
     local classes = {"Fighter", "Wizard", "Rogue", "Cleric"}
-    Ext.Print("Selected class: " .. classes[widget.SelectedIndex])
+    -- SelectedIndex is 0-based (upstream contract)
+    Ext.Print("Selected class: " .. classes[widget.SelectedIndex + 1])
 end
 
 win:AddSeparator()
@@ -54,7 +55,8 @@ win:AddText("--- Numeric Widgets ---")
 -- Slider
 local slider = win:AddSlider("Health", 100, 0, 200)
 slider.OnChange = function(widget)
-    Ext.Print("Health: " .. widget.Value)
+    -- Value is a 4-lane array (upstream contract)
+    Ext.Print("Health: " .. widget.Value[1])
 end
 
 -- Progress Bar

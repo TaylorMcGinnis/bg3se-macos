@@ -73,6 +73,12 @@ typedef enum {
     // Client input events (needed by MCM's SubscribedEvents)
     EVENT_CONTROLLER_BUTTON_INPUT,           // Gamepad button input
     EVENT_MOUSE_BUTTON_INPUT,                // Mouse button input
+    // The rest of upstream's client set (BuiltinLibraryClient.lua). Only
+    // KeyInput is dispatched today; these exist so a Subscribe does not
+    // index nil -- BG3SX subscribes ControllerAxisInput at UI init.
+    EVENT_MOUSE_WHEEL_INPUT,                 // Mouse wheel input
+    EVENT_CONTROLLER_AXIS_INPUT,             // Gamepad axis input
+    EVENT_VIEWPORT_RESIZED,                  // Game window resized
     EVENT_MAX
 } BG3SEEventType;
 

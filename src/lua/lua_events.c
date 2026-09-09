@@ -174,6 +174,9 @@ static const char *g_event_names[EVENT_MAX] = {
     // Client input events (needed by MCM's SubscribedEvents)
     "ControllerButtonInput",
     "MouseButtonInput",
+    "MouseWheelInput",
+    "ControllerAxisInput",
+    "ViewportResized",
 };
 
 // ============================================================================

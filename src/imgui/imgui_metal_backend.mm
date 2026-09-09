@@ -1059,7 +1059,7 @@ static void render_widget(ImguiObject *obj) {
                 if (ImGui::Checkbox(obj->styled.label, &checked)) {
                     obj->data.checkbox.checked = checked;
                     LOG_IMGUI_DEBUG("Checkbox '%s' changed to %d", obj->styled.label, checked);
-                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE, (int)checked);
+                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE);
                 }
             }
             break;
@@ -1111,52 +1111,84 @@ static void render_widget(ImguiObject *obj) {
                 if (changed) {
                     strncpy(obj->data.input_text.text, buf, sizeof(obj->data.input_text.text) - 1);
                     obj->data.input_text.text[sizeof(obj->data.input_text.text) - 1] = '\0';
-                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE, 0);
+                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE);
                 }
             }
             break;
 
         case IMGUI_OBJ_COMBO:
             {
+                // Mirrors upstream Combo::StyledRender: SelectedIndex is 0-based
+                // with -1 = nothing selected (no preview), and OnChange fires
+                // only when the selection actually changes.
                 const char* preview = (obj->data.combo.selected_index >= 0 &&
                                        obj->data.combo.selected_index < obj->data.combo.option_count)
                     ? obj->data.combo.options[obj->data.combo.selected_index]
-                    : "";
+                    : nullptr;
 
                 if (ImGui::BeginCombo(obj->styled.label, preview, (ImGuiComboFlags)obj->data.combo.flags)) {
+                    int picked = -1;
                     for (int i = 0; i < obj->data.combo.option_count; i++) {
                         bool is_selected = (obj->data.combo.selected_index == i);
                         if (ImGui::Selectable(obj->data.combo.options[i], is_selected)) {
-                            obj->data.combo.selected_index = i;
-                            lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE, i + 1);  // 1-indexed for Lua
+                            picked = i;
                         }
                         if (is_selected) {
                             ImGui::SetItemDefaultFocus();
                         }
+                    }
+                    if (picked != -1 && picked != obj->data.combo.selected_index) {
+                        obj->data.combo.selected_index = picked;
+                        lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE);
                     }
                     ImGui::EndCombo();
                 }
             }
             break;
 
+        /*
+         * Numeric widgets render all Components lanes through the ScalarN
+         * family exactly as upstream does (SliderScalar::StyledRender and
+         * friends), writing straight into the object's 4-lane arrays. The
+         * single-lane SliderFloat/DragInt/InputInt calls this port used
+         * ignored Components, Flags and Vertical entirely.
+         */
         case IMGUI_OBJ_SLIDER_SCALAR:
             {
-                float val = obj->data.slider.value.x;
-                if (ImGui::SliderFloat(obj->styled.label, &val,
-                                       obj->data.slider.min.x, obj->data.slider.max.x)) {
-                    obj->data.slider.value.x = val;
-                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE, 0);
+                ImguiSliderData *s = &obj->data.slider;
+                bool changed;
+                if (s->is_vertical) {
+                    changed = ImGui::VSliderScalar(obj->styled.label,
+                                                   ImVec2(s->vertical_size.x, s->vertical_size.y),
+                                                   ImGuiDataType_Float, &s->value.x, &s->min.x, &s->max.x,
+                                                   nullptr, (ImGuiSliderFlags)s->flags);
+                } else {
+                    changed = ImGui::SliderScalarN(obj->styled.label, ImGuiDataType_Float, &s->value.x,
+                                                   s->components, &s->min.x, &s->max.x, nullptr,
+                                                   (ImGuiSliderFlags)s->flags);
+                }
+                if (changed) {
+                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE);
                 }
             }
             break;
 
         case IMGUI_OBJ_SLIDER_INT:
             {
-                int val = obj->data.slider_int.value[0];
-                if (ImGui::SliderInt(obj->styled.label, &val,
-                                     obj->data.slider_int.min[0], obj->data.slider_int.max[0])) {
-                    obj->data.slider_int.value[0] = val;
-                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE, val);
+                ImguiSliderIntData *s = &obj->data.slider_int;
+                bool changed;
+                if (s->is_vertical) {
+                    changed = ImGui::VSliderInt(obj->styled.label,
+                                                ImVec2(s->vertical_size.x, s->vertical_size.y),
+                                                &s->value[0], s->min[0], s->max[0], nullptr,
+                                                (ImGuiSliderFlags)s->flags);
+                } else {
+                    changed = ImGui::SliderScalarN(obj->styled.label, ImGuiDataType_S32, s->value,
+                                                   s->components, s->min, s->max, nullptr,
+                                                   (ImGuiSliderFlags)s->flags);
+                }
+                if (changed) {
+                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE);
                 }
             }
             break;
@@ -1223,10 +1255,13 @@ static void render_widget(ImguiObject *obj) {
 
         case IMGUI_OBJ_RADIO_BUTTON:
             {
-                bool active = obj->data.radio_button.active;
-                if (ImGui::RadioButton(obj->styled.label, active)) {
-                    obj->data.radio_button.active = !active;
-                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CLICK);
+                // Upstream RadioButton::StyledRender: a click fires OnChange(handle,
+                // Active) and leaves Active to the mod, which owns the group's
+                // exclusivity (MCM sets the clicked one true and the rest false in
+                // its OnChange). The port used to toggle Active and fire OnClick,
+                // which MCM never subscribes to.
+                if (ImGui::RadioButton(obj->styled.label, obj->data.radio_button.active)) {
+                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE);
                 }
             }
             break;
@@ -1244,7 +1279,7 @@ static void render_widget(ImguiObject *obj) {
                     obj->data.color.color.y = col[1];
                     obj->data.color.color.z = col[2];
                     obj->data.color.color.w = col[3];
-                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE, 0);
+                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE);
                 }
             }
             break;
@@ -1262,51 +1297,47 @@ static void render_widget(ImguiObject *obj) {
                     obj->data.color.color.y = col[1];
                     obj->data.color.color.z = col[2];
                     obj->data.color.color.w = col[3];
-                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE, 0);
+                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE);
                 }
             }
             break;
 
         case IMGUI_OBJ_DRAG_SCALAR:
             {
-                float val = obj->data.slider.value.x;
-                if (ImGui::DragFloat(obj->styled.label, &val,
-                                     0.1f, obj->data.slider.min.x, obj->data.slider.max.x)) {
-                    obj->data.slider.value.x = val;
-                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE, 0);
+                ImguiSliderData *s = &obj->data.slider;
+                if (ImGui::DragScalarN(obj->styled.label, ImGuiDataType_Float, &s->value.x, s->components,
+                                       1.0f, &s->min.x, &s->max.x, nullptr, (ImGuiSliderFlags)s->flags)) {
+                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE);
                 }
             }
             break;
 
         case IMGUI_OBJ_DRAG_INT:
             {
-                int val = obj->data.slider_int.value[0];
-                if (ImGui::DragInt(obj->styled.label, &val,
-                                   1.0f, obj->data.slider_int.min[0], obj->data.slider_int.max[0])) {
-                    obj->data.slider_int.value[0] = val;
-                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE, val);
+                ImguiSliderIntData *s = &obj->data.slider_int;
+                if (ImGui::DragScalarN(obj->styled.label, ImGuiDataType_S32, s->value, s->components,
+                                       1.0f, s->min, s->max, nullptr, (ImGuiSliderFlags)s->flags)) {
+                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE);
                 }
             }
             break;
 
         case IMGUI_OBJ_INPUT_SCALAR:
             {
-                float val = obj->data.slider.value.x;
-                if (ImGui::InputFloat(obj->styled.label, &val, 0.0f, 0.0f, "%.3f",
-                                      (ImGuiInputTextFlags)obj->data.slider.flags)) {
-                    obj->data.slider.value.x = val;
-                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE, 0);
+                ImguiSliderData *s = &obj->data.slider;
+                if (ImGui::InputScalarN(obj->styled.label, ImGuiDataType_Float, &s->value.x, s->components,
+                                        nullptr, nullptr, nullptr, (ImGuiInputTextFlags)s->flags)) {
+                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE);
                 }
             }
             break;
 
         case IMGUI_OBJ_INPUT_INT:
             {
-                int val = obj->data.slider_int.value[0];
-                if (ImGui::InputInt(obj->styled.label, &val, 1, 100,
-                                    (ImGuiInputTextFlags)obj->data.slider_int.flags)) {
-                    obj->data.slider_int.value[0] = val;
-                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE, val);
+                ImguiSliderIntData *s = &obj->data.slider_int;
+                if (ImGui::InputScalarN(obj->styled.label, ImGuiDataType_S32, s->value, s->components,
+                                        nullptr, nullptr, nullptr, (ImGuiInputTextFlags)s->flags)) {
+                    lua_imgui_fire_event(obj->handle, IMGUI_EVENT_ON_CHANGE);
                 }
             }
             break;

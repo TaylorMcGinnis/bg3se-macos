@@ -331,7 +331,11 @@ int lua_ext_memory_read(lua_State *L) {
     // Check if memory is readable
     if (!is_memory_readable(addr, (size_t)size)) {
         lua_pushnil(L);
-        lua_pushfstring(L, "Memory at 0x%llx is not readable", (unsigned long long)addr);
+        // lua_pushfstring has no %llx; it raised "invalid option '%l'" here
+        // instead of returning nil, err.
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Memory at 0x%llx is not readable", (unsigned long long)addr);
+        lua_pushstring(L, msg);
         return 2;
     }
 

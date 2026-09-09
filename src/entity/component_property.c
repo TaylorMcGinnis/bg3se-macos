@@ -28,6 +28,9 @@
 #include "guid_lookup.h"
 #include "../core/guid_format.h"
 #include "component_registry.h"
+#include "entity_system.h"  // lua_entity_push_handle / lua_entity_to_handle
+#include "../template/template_layouts.h"
+#include "../lua/lua_resource_object.h"
 
 #include <limits.h>
 #include <math.h>
@@ -472,15 +475,15 @@ static int roll_map_stage(lua_State *L, int tableIndex, RollMapEntryStaged *entr
         for (size_t i = 0; i < n; i++) {
             lua_rawgeti(L, arr, (lua_Integer)i + 1);
             if (lua_type(L, -1) != LUA_TTABLE) {
-                return luaL_error(L, "%s: roll %zu for damage type %d must be a table",
-                                  what, i + 1, (int)e->key);
+                return luaL_error(L, "%s: roll %I for damage type %d must be a table",
+                                  what, (lua_Integer)(i + 1), (int)e->key);
             }
             int roll = lua_absindex(L, -1);
             RollDefinitionStaged *r = &e->rolls[i];
             if (!roll_map_stage_u8_field(L, roll, "DiceValue", &g_enum_DiceSizeId, &r->diceValue)
                 || !roll_map_stage_u8_field(L, roll, "AmountOfDices", NULL, &r->amountOfDices)) {
-                return luaL_error(L, "%s: roll %zu for damage type %d has an invalid "
-                                  "DiceValue/AmountOfDices", what, i + 1, (int)e->key);
+                return luaL_error(L, "%s: roll %I for damage type %d has an invalid "
+                                  "DiceValue/AmountOfDices", what, (lua_Integer)(i + 1), (int)e->key);
             }
             lua_getfield(L, roll, "DiceAdditionalValue");
             if (lua_isnil(L, -1)) {
@@ -683,25 +686,21 @@ static void plain_array_stage_element(lua_State *L, int valueIndex,
             if (slen > 0) {
                 const char *tail = slen > 36 ? s + slen - 36 : s;
                 if (!guid_parse(tail, &value)) {
-                    luaL_error(L, "'%s' is not a valid GUID for %s[%lld]", s, what,
-                               (long long)position);
+                    luaL_error(L, "'%s' is not a valid GUID for %s[%I]", s, what,
+                               (lua_Integer)position);
                 }
             }
             memcpy(dst, &value, sizeof(value));
             return;
         }
         case ELEM_TYPE_ENTITY_HANDLE: {
+            // Entity proxy (what reads now hand out), integer, or "0x..." string.
             uint64_t value = 0;
-            if (lua_type(L, valueIndex) == LUA_TSTRING) {
-                const char *s = lua_tostring(L, valueIndex);
-                char *end = NULL;
-                value = strtoull(s, &end, 0);
-                if (end == s || *end != '\0') {
-                    luaL_error(L, "'%s' is not a valid entity handle for %s[%lld]", s,
-                               what, (long long)position);
-                }
-            } else {
-                value = (uint64_t)luaL_checkinteger(L, valueIndex);
+            if (lua_isnil(L, valueIndex)) {
+                value = ENTITY_HANDLE_NULL;
+            } else if (!lua_entity_to_handle(L, valueIndex, &value)) {
+                luaL_error(L, "%s[%I]: expected entity, number or hex string, got %s",
+                           what, (lua_Integer)position, luaL_typename(L, valueIndex));
             }
             memcpy(dst, &value, sizeof(value));
             return;
@@ -716,8 +715,8 @@ static void plain_array_stage_element(lua_State *L, int valueIndex,
                 if (slen > 0) {
                     fs = fixed_string_intern(s, (int)slen);
                     if (fs == FS_NULL_INDEX) {
-                        luaL_error(L, "Could not intern FixedString for %s[%lld]", what,
-                                   (long long)position);
+                        luaL_error(L, "Could not intern FixedString for %s[%I]", what,
+                                   (lua_Integer)position);
                     }
                 }
             }
@@ -743,7 +742,7 @@ static bool plain_array_write(lua_State *L, mach_vm_address_t addr, int tableInd
 
     size_t count = lua_rawlen(L, absTable);
     if (count > PLAIN_ARRAY_MAX_ELEMENTS) {
-        luaL_error(L, "%s: %zu elements exceeds the %d element limit", what, count,
+        luaL_error(L, "%s: %I elements exceeds the %d element limit", what, (lua_Integer)count,
                    PLAIN_ARRAY_MAX_ELEMENTS);
         return false;
     }
@@ -790,6 +789,10 @@ static bool plain_array_write(lua_State *L, mach_vm_address_t addr, int tableInd
     LOG_ENTITY_DEBUG("%s: rebuilt array with %zu element(s)", what, count);
     return true;
 }
+
+// Defined with the array proxy code below (shares its element pushers).
+static void hash_map_push(lua_State *L, mach_vm_address_t addr,
+                          const ComponentPropertyDef *prop);
 
 int component_property_read_def(lua_State *L, void *componentPtr,
                                 const ComponentPropertyDef *prop) {
@@ -1010,12 +1013,11 @@ int component_property_read_def(lua_State *L, void *componentPtr,
         }
 
         case FIELD_TYPE_ENTITY_HANDLE: {
+            // Entity proxy (nil for the null handle), as upstream pushes
+            // EntityHandle — see lua_entity_push_handle.
             uint64_t val = 0;
             if (safe_memory_read((mach_vm_address_t)addr, &val, sizeof(val))) {
-                // Return as hex string for debugging
-                char buf[32];
-                snprintf(buf, sizeof(buf), "0x%llx", (unsigned long long)val);
-                lua_pushstring(L, buf);
+                lua_entity_push_handle(L, (EntityHandle)val);
             } else {
                 lua_pushnil(L);
             }
@@ -1060,6 +1062,34 @@ int component_property_read_def(lua_State *L, void *componentPtr,
                 return 1;
             }
             component_property_push_proxy(L, target, prop->structLayout);
+            return 1;
+        }
+
+        case FIELD_TYPE_TEMPLATE_PTR: {
+            // GameObjectTemplate* member: the same live proxy Ext.Template
+            // returns, so mods get .Name/.Id off entity.ServerCharacter.Template
+            GameObjectTemplate *tmpl = NULL;
+            if (!safe_memory_read((mach_vm_address_t)addr, &tmpl, sizeof(tmpl))
+                || !tmpl) {
+                lua_pushnil(L);
+                return 1;
+            }
+            lua_resource_object_push_layout(L, tmpl, template_layout_for(tmpl));
+            return 1;
+        }
+
+        case FIELD_TYPE_STRUCT: {
+            // Embedded struct: proxy the member in place with its own layout
+            if (!prop->structLayout) {
+                lua_pushnil(L);
+                return 1;
+            }
+            component_property_push_proxy(L, (void *)addr, prop->structLayout);
+            return 1;
+        }
+
+        case FIELD_TYPE_HASH_MAP: {
+            hash_map_push(L, (mach_vm_address_t)addr, prop);
             return 1;
         }
 
@@ -1183,7 +1213,10 @@ static bool component_property_is_pointer_typed(const ComponentPropertyDef *prop
      * of structs additionally require ownership/lifetime operations that this
      * layer cannot provide, so those stay refused.
      */
-    if (prop && prop->type == FIELD_TYPE_STRUCT_PTR) return true;
+    if (prop && (prop->type == FIELD_TYPE_STRUCT_PTR
+                 || prop->type == FIELD_TYPE_TEMPLATE_PTR
+                 || prop->type == FIELD_TYPE_STRUCT       // assign members via the proxy
+                 || prop->type == FIELD_TYPE_HASH_MAP)) return true;
     return prop && prop->type == FIELD_TYPE_DYNAMIC_ARRAY
         && !plain_array_elem_writable(prop);
 }
@@ -1442,20 +1475,17 @@ bool component_property_write(lua_State *L, void *componentPtr,
         }
 
         case FIELD_TYPE_ENTITY_HANDLE: {
-            // Reads surface handles as "0x..." strings; accept those and
-            // plain integers (upstream EntityHandle is a uint64).
+            // Reads push entity proxies (upstream parity); accept those, plain
+            // integers, the "0x..." strings older serialized tables carry, and
+            // nil for the null handle.
             uint64_t value = 0;
-            if (lua_type(L, valueIndex) == LUA_TSTRING) {
-                const char *s = lua_tostring(L, valueIndex);
-                char *end = NULL;
-                value = strtoull(s, &end, 0);
-                if (end == s || *end != '\0') {
-                    luaL_error(L, "'%s' is not a valid entity handle for %s.%s", s,
-                               layout->componentName, propertyName);
-                    return false;
-                }
-            } else {
-                value = (uint64_t)luaL_checkinteger(L, valueIndex);
+            if (lua_isnil(L, valueIndex)) {
+                value = ENTITY_HANDLE_NULL;
+            } else if (!lua_entity_to_handle(L, valueIndex, &value)) {
+                luaL_error(L, "%s.%s: expected entity, number or hex string, got %s",
+                           layout->componentName, propertyName,
+                           luaL_typename(L, valueIndex));
+                return false;
             }
             wrote = safe_memory_write(address, &value, sizeof(value));
             break;
@@ -1493,8 +1523,8 @@ bool component_property_write(lua_State *L, void *componentPtr,
             luaL_checktype(L, absoluteIndex, LUA_TTABLE);
             size_t suppliedSize = lua_rawlen(L, absoluteIndex);
             if (suppliedSize != prop->arraySize) {
-                luaL_error(L, "Value for %s.%s must contain exactly %u elements",
-                           layout->componentName, propertyName, prop->arraySize);
+                luaL_error(L, "Value for %s.%s must contain exactly %d elements",
+                           layout->componentName, propertyName, (int)prop->arraySize);
                 return false;
             }
 
@@ -1503,8 +1533,8 @@ bool component_property_write(lua_State *L, void *componentPtr,
                 lua_rawgeti(L, absoluteIndex, (lua_Integer)i + 1);
                 lua_Integer raw = luaL_checkinteger(L, -1);
                 if (raw < INT32_MIN || raw > INT32_MAX) {
-                    luaL_error(L, "Element %u for %s.%s is outside int32 range",
-                               (unsigned)i + 1, layout->componentName, propertyName);
+                    luaL_error(L, "Element %d for %s.%s is outside int32 range",
+                               (int)i + 1, layout->componentName, propertyName);
                     return false;
                 }
                 values[i] = (int32_t)raw;
@@ -1526,8 +1556,8 @@ bool component_property_write(lua_State *L, void *componentPtr,
             luaL_checktype(L, absoluteIndex, LUA_TTABLE);
             size_t suppliedSize = lua_rawlen(L, absoluteIndex);
             if (suppliedSize != prop->arraySize) {
-                luaL_error(L, "Value for %s.%s must contain exactly %u elements",
-                           layout->componentName, propertyName, prop->arraySize);
+                luaL_error(L, "Value for %s.%s must contain exactly %d elements",
+                           layout->componentName, propertyName, (int)prop->arraySize);
                 return false;
             }
 
@@ -1536,8 +1566,8 @@ bool component_property_write(lua_State *L, void *componentPtr,
                 lua_rawgeti(L, absoluteIndex, (lua_Integer)i + 1);
                 double raw = (double)luaL_checknumber(L, -1);
                 if (isnan(raw) || isinf(raw)) {
-                    luaL_error(L, "Element %u for %s.%s is NaN or infinity",
-                               (unsigned)i + 1, layout->componentName, propertyName);
+                    luaL_error(L, "Element %d for %s.%s is NaN or infinity",
+                               (int)i + 1, layout->componentName, propertyName);
                     return false;
                 }
                 values[i] = (float)raw;
@@ -1878,8 +1908,50 @@ static int array_proxy_push_element(lua_State *L, ArrayProxy *proxy, void *buf, 
         }
 
         case ELEM_TYPE_FIXED_STRING: {
+            // Resolved like FIELD_TYPE_FIXEDSTRING: upstream Array<FixedString>
+            // reads as strings (StatusContainer values, esv::Character::Treasures)
             uint32_t val = 0;
-            if (safe_memory_read_u32((mach_vm_address_t)elemAddr, &val)) {
+            if (!safe_memory_read_u32((mach_vm_address_t)elemAddr, &val)) {
+                lua_pushnil(L);
+                return 1;
+            }
+            if (val == FS_NULL_INDEX) {
+                lua_pushstring(L, "");
+                return 1;
+            }
+            const char *resolved = fixed_string_resolve(val);
+            if (resolved) {
+                lua_pushstring(L, resolved);
+            } else {
+                lua_pushinteger(L, val);  // unresolvable: surface the index
+            }
+            return 1;
+        }
+
+        case ELEM_TYPE_ENTITY_HANDLE: {
+            // Entity proxy per element (nil for the null handle), as upstream
+            uint64_t val = 0;
+            if (safe_memory_read((mach_vm_address_t)elemAddr, &val, sizeof(val))) {
+                lua_entity_push_handle(L, (EntityHandle)val);
+            } else {
+                lua_pushnil(L);
+            }
+            return 1;
+        }
+
+        case ELEM_TYPE_STRUCT: {
+            // Array<T> of structs: proxy element i in place
+            if (!proxy->structLayout) {
+                lua_pushnil(L);
+                return 1;
+            }
+            component_property_push_proxy(L, (void *)elemAddr, proxy->structLayout);
+            return 1;
+        }
+
+        case ELEM_TYPE_UINT16: {
+            uint16_t val = 0;
+            if (safe_memory_read((mach_vm_address_t)elemAddr, &val, sizeof(val))) {
                 lua_pushinteger(L, val);
             } else {
                 lua_pushnil(L);
@@ -1887,12 +1959,12 @@ static int array_proxy_push_element(lua_State *L, ArrayProxy *proxy, void *buf, 
             return 1;
         }
 
-        case ELEM_TYPE_ENTITY_HANDLE: {
-            uint64_t val = 0;
-            if (safe_memory_read((mach_vm_address_t)elemAddr, &val, sizeof(val))) {
-                char buf[32];
-                snprintf(buf, sizeof(buf), "0x%llx", (unsigned long long)val);
-                lua_pushstring(L, buf);
+        case ELEM_TYPE_INT32:
+        case ELEM_TYPE_UINT32: {
+            uint32_t val = 0;
+            if (safe_memory_read_u32((mach_vm_address_t)elemAddr, &val)) {
+                lua_pushinteger(L, proxy->elemType == ELEM_TYPE_INT32 ? (lua_Integer)(int32_t)val
+                                                                       : (lua_Integer)val);
             } else {
                 lua_pushnil(L);
             }
@@ -1954,7 +2026,7 @@ static int array_proxy_push_element(lua_State *L, ArrayProxy *proxy, void *buf, 
             }
 
             // Boosts: the boost entity handles (upstream BoostEntry.Boosts),
-            // surfaced as "0x..." strings like ELEM_TYPE_ENTITY_HANDLE.
+            // entity proxies like ELEM_TYPE_ENTITY_HANDLE.
             uint64_t boostBuf = 0;
             if (safe_memory_read((mach_vm_address_t)(elemAddr + 8), &boostBuf, sizeof(boostBuf))
                 && boostBuf != 0 && boostCount <= 256) {
@@ -1965,9 +2037,7 @@ static int array_proxy_push_element(lua_State *L, ArrayProxy *proxy, void *buf, 
                                           &handle, sizeof(handle))) {
                         break;
                     }
-                    char handleBuf[32];
-                    snprintf(handleBuf, sizeof(handleBuf), "0x%llx", (unsigned long long)handle);
-                    lua_pushstring(L, handleBuf);
+                    lua_entity_push_handle(L, (EntityHandle)handle);
                     lua_rawseti(L, -2, (lua_Integer)i + 1);
                 }
                 lua_setfield(L, -2, "Boosts");
@@ -1998,7 +2068,6 @@ static int array_proxy_push_element(lua_State *L, ArrayProxy *proxy, void *buf, 
             return 1;
         }
 
-        case ELEM_TYPE_SPELL_DATA:
         case ELEM_TYPE_SPELL_META:
         case ELEM_TYPE_STATUS_INFO:
         case ELEM_TYPE_UNKNOWN:
@@ -2021,18 +2090,61 @@ static int array_proxy_push_element(lua_State *L, ArrayProxy *proxy, void *buf, 
             lua_pushinteger(L, proxy->elemSize);
             lua_setfield(L, -2, "__size");
 
-            // For SpellData, try to extract the SpellId (first field is SpellId struct)
-            if (proxy->elemType == ELEM_TYPE_SPELL_DATA) {
-                // SpellId is at offset 0, contains FixedString at 0x00
-                uint32_t spellId = 0;
-                if (safe_memory_read_u32((mach_vm_address_t)elemAddr, &spellId)) {
-                    lua_pushinteger(L, spellId);
-                    lua_setfield(L, -2, "SpellId");
-                }
-            }
-
             return 1;
         }
+    }
+}
+
+// Read a HashMap<TKey, TValue> (layout in component_property.h) as a plain
+// { [key] = value } table in Keys order. Keys and values go through the array
+// element pushers, so EntityHandle keys are entity proxies and FixedString
+// values are strings — StatusContainer.Statuses iterates as on Windows:
+//   for statusEntity, statusId in pairs(entity.StatusContainer.Statuses)
+// Nil when the header does not look like a map. Never writes game memory.
+#define HASHMAP_MAX_ENTRIES 65536
+
+static void hash_map_push(lua_State *L, mach_vm_address_t addr,
+                          const ComponentPropertyDef *prop) {
+    uint64_t keysBuf = 0, valuesBuf = 0;
+    uint32_t keyCount = 0, valueCapacity = 0;
+    if (!safe_memory_read(addr + HASHMAP_KEYS_BUF_OFFSET, &keysBuf, sizeof(keysBuf))
+        || !safe_memory_read_u32(addr + HASHMAP_KEYS_SIZE_OFFSET, &keyCount)
+        || !safe_memory_read(addr + HASHMAP_VALUES_BUF_OFFSET, &valuesBuf, sizeof(valuesBuf))
+        || !safe_memory_read_u32(addr + HASHMAP_VALUES_SIZE_OFFSET, &valueCapacity)) {
+        lua_pushnil(L);
+        return;
+    }
+    // Values is a StaticArray sized to the key capacity, so every live key
+    // has a value slot; anything else is not a HashMap.
+    if (keyCount > HASHMAP_MAX_ENTRIES || keyCount > valueCapacity
+        || (keyCount != 0 && (keysBuf == 0 || valuesBuf == 0))
+        || prop->elemSize == 0 || prop->valueSize == 0) {
+        LOG_ENTITY_DEBUG("hash map at %p: implausible header (keys=%u values=%u "
+                         "keysBuf=0x%llx valuesBuf=0x%llx)",
+                         (void *)(uintptr_t)addr, keyCount, valueCapacity,
+                         (unsigned long long)keysBuf, (unsigned long long)valuesBuf);
+        lua_pushnil(L);
+        return;
+    }
+
+    ArrayProxy keys = {
+        .elemType = prop->elemType, .elemSize = prop->elemSize,
+        .structLayout = prop->structLayout
+    };
+    ArrayProxy values = {
+        .elemType = prop->valueType, .elemSize = prop->valueSize,
+        .structLayout = prop->structLayout
+    };
+
+    lua_createtable(L, 0, (int)keyCount);
+    for (uint32_t i = 0; i < keyCount; i++) {
+        array_proxy_push_element(L, &keys, (void *)(uintptr_t)keysBuf, i);
+        if (lua_isnil(L, -1)) {  // null-handle key: nothing to index by
+            lua_pop(L, 1);
+            continue;
+        }
+        array_proxy_push_element(L, &values, (void *)(uintptr_t)valuesBuf, i);
+        lua_rawset(L, -3);
     }
 }
 
@@ -2164,7 +2276,55 @@ void component_property_push_array_proxy(lua_State *L, void *arrayPtr,
     lua_setmetatable(L, -2);
 }
 
-static void serialize_array_proxy(lua_State *L, ArrayProxy *proxy) {
+// Serialized tables hold no game references (they feed Ext.Json / the
+// PersistentVars store), so nesting is bounded rather than trusting layouts
+// never to point back at themselves.
+#define SERIALIZE_MAX_DEPTH 8
+
+static bool serialize_proxy_at(lua_State *L, int index, int depth);
+
+// Replace the value on top of the stack with a reference-free form: entity
+// proxies become the "0x..." handle string reads used to return, component /
+// array proxies become plain tables, and plain tables (HashMap reads, BoostEntry
+// rows) are rebuilt so proxy keys and values inside them are flattened too.
+static void serialize_flatten_top(lua_State *L, int depth) {
+    switch (lua_type(L, -1)) {
+        case LUA_TUSERDATA: {
+            EntityUserdata *entity =
+                (EntityUserdata *)luaL_testudata(L, -1, "BG3Entity");
+            if (entity) {
+                char handle[32];
+                snprintf(handle, sizeof(handle), "0x%llx",
+                         (unsigned long long)entity->handle);
+                lua_pop(L, 1);
+                lua_pushstring(L, handle);
+                return;
+            }
+            if (depth < SERIALIZE_MAX_DEPTH && serialize_proxy_at(L, -1, depth + 1)) {
+                lua_remove(L, -2);
+            }
+            return;
+        }
+        case LUA_TTABLE: {
+            if (depth >= SERIALIZE_MAX_DEPTH) return;
+            lua_newtable(L);                       // src dst
+            lua_pushnil(L);                        // src dst nil
+            while (lua_next(L, -3)) {              // src dst k v
+                lua_pushvalue(L, -2);              // src dst k v k
+                serialize_flatten_top(L, depth + 1);  // src dst k v k'
+                lua_insert(L, -2);                 // src dst k k' v
+                serialize_flatten_top(L, depth + 1);  // src dst k k' v'
+                lua_rawset(L, -4);                 // src dst k
+            }
+            lua_remove(L, -2);                     // dst
+            return;
+        }
+        default:
+            return;
+    }
+}
+
+static void serialize_array_proxy(lua_State *L, ArrayProxy *proxy, int depth) {
     if (!proxy || proxy->elemSize == 0) {
         lua_pushnil(L);
         return;
@@ -2186,17 +2346,16 @@ static void serialize_array_proxy(lua_State *L, ArrayProxy *proxy) {
     lua_createtable(L, (int)size, 0);
     for (uint32_t i = 0; i < size; i++) {
         array_proxy_push_element(L, proxy, buf, i);
-        // Struct-pointer elements come back as proxies; flatten them so the
-        // serialized table holds no game references.
-        if (proxy->elemType == ELEM_TYPE_STRUCT_PTR && lua_isuserdata(L, -1)
-            && component_property_serialize_proxy(L, -1)) {
-            lua_remove(L, -2);
-        }
+        serialize_flatten_top(L, depth);
         lua_rawseti(L, -2, (lua_Integer)i + 1);
     }
 }
 
 bool component_property_serialize_proxy(lua_State *L, int index) {
+    return serialize_proxy_at(L, index, 0);
+}
+
+static bool serialize_proxy_at(lua_State *L, int index, int depth) {
     int absoluteIndex = lua_absindex(L, index);
     ComponentProxy *component = (ComponentProxy *)luaL_testudata(
         L, absoluteIndex, COMPONENT_PROXY_METATABLE);
@@ -2217,14 +2376,26 @@ bool component_property_serialize_proxy(lua_State *L, int index) {
                     .structLayout = prop->structLayout,
                     .lifetime = component->lifetime
                 };
-                serialize_array_proxy(L, &array);
+                serialize_array_proxy(L, &array, depth);
+            } else if (prop->type == FIELD_TYPE_TEMPLATE_PTR) {
+                // Serialized tables hold no game references: stand in the
+                // template's Id (its GUID text) for the live proxy.
+                GameObjectTemplate *tmpl = NULL;
+                char id[40];
+                if (safe_memory_read(
+                        (mach_vm_address_t)((char *)component->componentPtr + prop->offset),
+                        &tmpl, sizeof(tmpl))
+                    && tmpl && template_get_guid_string(tmpl, id, sizeof(id))) {
+                    lua_pushstring(L, id);
+                } else {
+                    lua_pushnil(L);
+                }
             } else {
                 component_property_read_def(
                     L, component->componentPtr, prop);
-                if (prop->type == FIELD_TYPE_STRUCT_PTR && lua_isuserdata(L, -1)
-                    && component_property_serialize_proxy(L, -1)) {
-                    lua_remove(L, -2);
-                }
+                // Entity handles, embedded / pointed-to structs and HashMaps
+                // come back as proxies or proxy-bearing tables; flatten them.
+                serialize_flatten_top(L, depth);
             }
 
             if (lua_isnil(L, -1)) {
@@ -2243,7 +2414,7 @@ bool component_property_serialize_proxy(lua_State *L, int index) {
             lifetime_lua_expired_error(L, "Array");
             return true;
         }
-        serialize_array_proxy(L, array);
+        serialize_array_proxy(L, array, depth);
         return true;
     }
 

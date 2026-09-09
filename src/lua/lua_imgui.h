@@ -30,13 +30,15 @@ extern "C" {
 void lua_imgui_register(lua_State *L, int ext_idx);
 
 /**
- * Fire an IMGUI event callback.
+ * Queue an IMGUI event callback (render thread). For OnChange the widget's
+ * new value is snapshotted from the object at call time and passed to Lua as
+ * upstream types it (bool / int / string / vec4 / ivec4), so call this AFTER
+ * writing the ImGui result back into the object.
  *
  * @param handle Object handle
  * @param event Event type
- * @param ... Event-specific arguments (depends on event type)
  */
-void lua_imgui_fire_event(ImguiHandle handle, ImguiEventType event, ...);
+void lua_imgui_fire_event(ImguiHandle handle, ImguiEventType event);
 
 // Drain queued IMGUI event callbacks on the main thread (they are enqueued from
 // the render thread by lua_imgui_fire_event). Call once per game tick.

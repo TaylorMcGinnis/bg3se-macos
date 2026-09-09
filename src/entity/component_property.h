@@ -51,7 +51,33 @@ typedef enum {
     // structLayout (e.g. esv::Item::StatusManager -> esv::StatusMachine).
     // Reads push a proxy over the pointee (nil when NULL); never writable.
     FIELD_TYPE_STRUCT_PTR,
+    // Pointer to a ls::GameObjectTemplate (esv::Character::Template). Reads
+    // push the same live field proxy Ext.Template.Get hands out
+    // (template_layouts.c), so .Name / .Id / .CharacterVisualResourceID read
+    // as they do upstream; nil when NULL. Never writable.
+    FIELD_TYPE_TEMPLATE_PTR,
+    // Struct embedded by value (e.g. SpellData::Id -> SpellId), described by
+    // structLayout. Reads push a proxy over the member's own address, so
+    // spell.Id.SourceType reads as upstream. Writes go through the member's
+    // proxy; the field itself is never assignable.
+    FIELD_TYPE_STRUCT,
+    // HashMap<TKey, TValue> (upstream CoreLib/Base/HashMap.h): HashSet<TKey>
+    // { StaticArray<int32> HashKeys @0x00; Array<int32> NextIds @0x10;
+    //   Array<TKey> Keys @0x20 } + UninitializedStaticArray<TValue> Values
+    // @0x30 — 0x40 bytes, verified live on eoc::status::ContainerComponent.
+    // Reads as a plain { [key] = value } table in Keys order (what pairs()
+    // yields upstream); elemType/elemSize describe the key, valueType/
+    // valueSize the value, both through the array element pushers. Never
+    // writable.
+    FIELD_TYPE_HASH_MAP,
 } FieldType;
+
+// HashMap<K, V> member offsets (see FIELD_TYPE_HASH_MAP).
+#define HASHMAP_KEYS_BUF_OFFSET    0x20
+#define HASHMAP_KEYS_SIZE_OFFSET   0x2c
+#define HASHMAP_VALUES_BUF_OFFSET  0x30
+#define HASHMAP_VALUES_SIZE_OFFSET 0x38
+#define HASHMAP_SIZE               0x40
 
 // ============================================================================
 // Element Types for Dynamic Arrays
@@ -59,7 +85,6 @@ typedef enum {
 
 typedef enum {
     ELEM_TYPE_UNKNOWN = 0,      // Raw bytes (element size required)
-    ELEM_TYPE_SPELL_DATA,       // spell::SpellData (88 bytes on ARM64)
     ELEM_TYPE_SPELL_META,       // spell::SpellMeta (80 bytes)
     ELEM_TYPE_STATUS_INFO,      // Generic status info
     ELEM_TYPE_GUID,             // Array of GUIDs
@@ -68,6 +93,11 @@ typedef enum {
     ELEM_TYPE_CLASS_INFO,       // ClassInfo (40 bytes: ClassUUID + SubClassUUID + Level)
     ELEM_TYPE_BOOST_ENTRY,      // BoostEntry (24 bytes: BoostType + Array<EntityHandle>)
     ELEM_TYPE_STRUCT_PTR,       // Array<T*>: each element proxied via structLayout
+    ELEM_TYPE_STRUCT,           // Array<T> of structs: element i proxied in place
+                                // via structLayout at buf + i * elemSize
+    ELEM_TYPE_UINT16,           // Plain integers (HashMap<uint16_t, ...> keys,
+    ELEM_TYPE_INT32,            // Array<int32_t>): pushed as Lua integers
+    ELEM_TYPE_UINT32,
 } ArrayElementType;
 
 // ============================================================================
@@ -91,8 +121,12 @@ typedef struct {
     uint16_t elemSize;          // Element size in bytes
     // Optional enum label table for integer fields (NULL = plain integer).
     const struct ComponentEnumDef *enumDef;
-    // Pointee layout for FIELD_TYPE_STRUCT_PTR / ELEM_TYPE_STRUCT_PTR.
+    // Layout for FIELD_TYPE_STRUCT_PTR / FIELD_TYPE_STRUCT and the
+    // ELEM_TYPE_STRUCT_PTR / ELEM_TYPE_STRUCT array elements.
     const struct ComponentLayoutDef *structLayout;
+    // For FIELD_TYPE_HASH_MAP: the value element (the key uses elemType/elemSize).
+    ArrayElementType valueType;
+    uint16_t valueSize;
 } ComponentPropertyDef;
 
 // ============================================================================

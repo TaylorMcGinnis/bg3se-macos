@@ -266,7 +266,7 @@ static void init_object_defaults(ImguiObject* obj, ImguiObjectType type) {
         case IMGUI_OBJ_COMBO:
             obj->data.combo.options = NULL;
             obj->data.combo.option_count = 0;
-            obj->data.combo.selected_index = 0;
+            obj->data.combo.selected_index = -1;  // upstream Combo::SelectedIndex{ -1 }: nothing selected
             obj->data.combo.flags = 0;
             break;
 
@@ -279,6 +279,7 @@ static void init_object_defaults(ImguiObject* obj, ImguiObjectType type) {
             obj->data.slider.components = 1;
             obj->data.slider.flags = 0;
             obj->data.slider.is_vertical = false;
+            obj->data.slider.vertical_size = (ImguiVec2){1, 1};  // upstream VerticalSize{ 1.0f }
             break;
 
         case IMGUI_OBJ_SLIDER_INT:
@@ -293,6 +294,7 @@ static void init_object_defaults(ImguiObject* obj, ImguiObjectType type) {
             obj->data.slider_int.components = 1;
             obj->data.slider_int.flags = 0;
             obj->data.slider_int.is_vertical = false;
+            obj->data.slider_int.vertical_size = (ImguiVec2){1, 1};
             break;
 
         case IMGUI_OBJ_COLOR_EDIT:

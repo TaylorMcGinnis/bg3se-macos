@@ -181,7 +181,7 @@ static int bitfield_tostring(lua_State *L) {
     EnumTypeInfo *info = enum_registry_get(ud->type_index);
 
     if (!info) {
-        lua_pushfstring(L, "Bitfield(%llu)", (unsigned long long)ud->value);
+        lua_pushfstring(L, "Bitfield(%I)", (lua_Integer)ud->value);
         return 1;
     }
 

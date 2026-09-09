@@ -169,6 +169,19 @@ char *pak_read_file(PakFile *pak, int entry_idx, size_t *out_size) {
     struct stat st;
     if (fstat(fileno(f), &st) != 0) return NULL;
     uint64_t file_size = (uint64_t)st.st_size;
+
+    // A zero-length entry is a real, empty file, not a malformed one. BG3SX
+    // ships three empty placeholders (Server/Listeners/SexListeners.lua,
+    // EntityListeners.lua, Server/Classes/Sex/SexModVars.lua) and Ext.Require
+    // of each was reported as "Module not found" because this returned NULL.
+    // Stored empties have disk_size 0; LZ4 empties are a 1-byte block that
+    // decompresses to 0 bytes (handled below by accepting result == 0).
+    if (entry->disk_size == 0 && entry->uncompressed_size == 0) {
+        char *empty = (char *)calloc(1, 1);
+        if (empty && out_size) *out_size = 0;
+        return empty;
+    }
+
     if (entry->disk_size == 0 || entry->disk_size > PAK_MAX_ENTRY_SIZE ||
         entry->uncompressed_size > PAK_MAX_ENTRY_SIZE ||
         entry->offset > file_size ||
@@ -222,7 +235,9 @@ char *pak_read_file(PakFile *pak, int entry_idx, size_t *out_size) {
         if (content) {
             int result = LZ4_decompress_safe((const char *)disk_data, content,
                                               entry->disk_size, entry->uncompressed_size);
-            if (result > 0) {
+            // result == 0 is a valid empty file: LSPK stores empties as a
+            // 1-byte LZ4 block (disk=1 uncomp=0), not as disk_size 0.
+            if (result >= 0) {
                 content[result] = '\0';
                 if (out_size) *out_size = result;
             } else {

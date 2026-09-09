@@ -33,6 +33,8 @@ SYSTEM_CONTEXT = "ecs::SystemsContext"
 CURATED_NON_SURFACE_COMPONENTS = (
     "ecl::Character",
     "ecl::Item",
+    "esv::Item",
+    "esv::Character",
     "eoc::rest::LongRestInScriptPhase",
 )
 

@@ -290,6 +290,67 @@ static bool imgui_get_vec4(lua_State *L, int idx, float *x, float *y, float *z, 
     return true;
 }
 
+/*
+ * Numeric widget lanes.
+ *
+ * Upstream models Value/Min/Max on DragScalar/SliderScalar/InputScalar as
+ * glm::vec4 and on DragInt/SliderInt/InputInt as glm::ivec4, so Lua always
+ * sees a 4-element array regardless of Components. Mods are written to that:
+ * MCM's number widgets assign `Value = { v, v, v, v }` and read `Value[1]`,
+ * BG3SX reads `Range.Value[1]`. This port exposed a bare number, so the
+ * assignment threw in luaL_checknumber and the read indexed a number -- every
+ * int/float/slider setting in MCM and BG3SX's range slider were dead.
+ *
+ * Assignment accepts the upstream 4-element array (lanes missing from a
+ * shorter table keep their value) and, as a convenience, a bare number, which
+ * fills every lane -- the same broadcast AddSlider(label, v, min, max) does
+ * upstream via glm::vec4(v).
+ */
+static void imgui_push_ivec4(lua_State *L, const int v[4]) {
+    lua_createtable(L, 4, 0);
+    for (int i = 0; i < 4; i++) {
+        lua_pushinteger(L, v[i]);
+        lua_rawseti(L, -2, i + 1);
+    }
+}
+
+static void imgui_fill_vec4(ImguiVec4 *out, float v) {
+    out->x = out->y = out->z = out->w = v;
+}
+
+static void imgui_fill_ivec4(int out[4], int v) {
+    out[0] = out[1] = out[2] = out[3] = v;
+}
+
+static void imgui_set_vec4_lanes(lua_State *L, int idx, ImguiVec4 *out) {
+    float *lanes[4] = { &out->x, &out->y, &out->z, &out->w };
+    if (lua_type(L, idx) == LUA_TTABLE) {
+        for (int i = 0; i < 4; i++) {
+            if (lua_rawgeti(L, idx, i + 1) == LUA_TNUMBER) {
+                *lanes[i] = (float)lua_tonumber(L, -1);
+            }
+            lua_pop(L, 1);
+        }
+        return;
+    }
+    float v = (float)luaL_checknumber(L, idx);
+    for (int i = 0; i < 4; i++) *lanes[i] = v;
+}
+
+static void imgui_set_ivec4_lanes(lua_State *L, int idx, int out[4]) {
+    if (lua_type(L, idx) == LUA_TTABLE) {
+        for (int i = 0; i < 4; i++) {
+            if (lua_rawgeti(L, idx, i + 1) == LUA_TNUMBER) {
+                out[i] = (int)lua_tonumber(L, -1);  // tolerate 5.0 as well as 5
+            }
+            lua_pop(L, 1);
+        }
+        return;
+    }
+    int v = (int)luaL_checknumber(L, idx);
+    for (int i = 0; i < 4; i++) out[i] = v;
+}
+
 // ============================================================================
 // Basic Visibility Control
 // ============================================================================
@@ -313,16 +374,18 @@ static bool imgui_get_vec4(lua_State *L, int idx, float *x, float *y, float *z, 
  * -- got a window that was open, visible, fully built, and never drawn. MCM
  * never calls Ext.IMGUI.Show() because on Windows there is nothing to call.
  *
- * Only opening raises the gate. Closing a window does not lower it: other mods
- * may have windows of their own open, and Ext.IMGUI.Hide() remains the way to
- * put the overlay away deliberately.
+ * The backend's render and input gates are now `s_state.visible ||
+ * has_visible_window()`, so an open mod window draws and takes input on its
+ * own; all that is needed here is the lazy backend init. This used to also
+ * call imgui_metal_set_visible(true), which is the F11 flag: every mod window
+ * (MCM, a stats panel) then dragged the built-in "BG3SE Debug" test window
+ * onto the screen with it, and closing the mod window left it there.
  */
 static void imgui_overlay_ensure_visible(void) {
     if (imgui_metal_get_state() == IMGUI_METAL_STATE_UNINITIALIZED) {
         LOG_IMGUI_INFO("Lazy-initializing ImGui Metal backend (window opened)");
-        if (!imgui_metal_init()) return;
+        imgui_metal_init();
     }
-    imgui_metal_set_visible(true);
 }
 
 static int lua_imgui_show(lua_State *L) {
@@ -930,14 +993,51 @@ static int imgui_window_add_inputtext(lua_State *L) {
  * window:AddCombo(label, options, [selected_index]) -> combo widget
  * options is a table of strings
  */
+/*
+ * Replace a combo's option list from the Lua array at `idx` (upstream
+ * Combo::Options, an Array<STDString>). Mods build combos empty and assign
+ * Options afterwards -- MCM's enum and profile widgets, BG3SX's scene picker --
+ * and this port used to drop the assignment on the floor, so every such combo
+ * rendered with no entries. The swap happens under the pool lock because the
+ * render pass walks the option array while holding it.
+ */
+static void imgui_combo_set_options(lua_State *L, ImguiObject *obj, int idx) {
+    luaL_checktype(L, idx, LUA_TTABLE);
+    int count = (int)lua_rawlen(L, idx);
+    char **options = NULL;
+    if (count > 0) {
+        options = (char **)calloc((size_t)count, sizeof(char *));
+        if (!options) {
+            luaL_error(L, "failed to allocate memory for combo options");
+            return;
+        }
+        for (int i = 0; i < count; i++) {
+            lua_rawgeti(L, idx, i + 1);
+            const char *opt = lua_tostring(L, -1);
+            options[i] = strdup(opt ? opt : "");
+            lua_pop(L, 1);
+        }
+    }
+
+    imgui_objects_lock();
+    char **old = obj->data.combo.options;
+    int old_count = obj->data.combo.option_count;
+    obj->data.combo.options = options;
+    obj->data.combo.option_count = count;
+    imgui_objects_unlock();
+
+    for (int i = 0; i < old_count; i++) free(old ? old[i] : NULL);
+    free(old);
+}
+
 static int imgui_window_add_combo(lua_State *L) {
     ImguiUserdata *ud = imgui_to_userdata(L, 1);
     const char *label = imgui_str_arg(L, 2, __func__);
-    // Options table is OPTIONAL: MCM calls AddCombo(label) and populates the
-    // options later via the .Options property. Requiring a table here threw and
-    // aborted MCM's profile header (and thus keybinding registration).
+    // Options table is OPTIONAL: upstream's AddCombo takes only the label and
+    // mods populate .Options afterwards. The extra arguments are a port
+    // extension; the index follows SelectedIndex (0-based).
     int has_options = (lua_type(L, 3) == LUA_TTABLE);
-    int selected = (int)luaL_optinteger(L, 4, 1) - 1;  // Lua 1-indexed to C 0-indexed
+    int selected = (int)luaL_optinteger(L, 4, -1);
 
     ImguiHandle child = imgui_object_create_child(ud->handle, IMGUI_OBJ_COMBO, label);
     if (child == IMGUI_INVALID_HANDLE) {
@@ -946,24 +1046,11 @@ static int imgui_window_add_combo(lua_State *L) {
 
     ImguiObject *obj = imgui_object_get(child);
     if (obj) {
-        // Count options
-        int count = has_options ? (int)lua_rawlen(L, 3) : 0;
-        if (count > 0) {
-            obj->data.combo.options = (char**)malloc(sizeof(char*) * count);
-            if (!obj->data.combo.options) {
-                imgui_object_destroy(child);
-                return luaL_error(L, "failed to allocate memory for combo options");
-            }
-            obj->data.combo.option_count = count;
-
-            for (int i = 0; i < count; i++) {
-                lua_rawgeti(L, 3, i + 1);
-                const char *opt = lua_tostring(L, -1);
-                obj->data.combo.options[i] = opt ? strdup(opt) : strdup("");
-                lua_pop(L, 1);
-            }
+        if (has_options) {
+            imgui_combo_set_options(L, obj, 3);
         }
-        obj->data.combo.selected_index = (selected >= 0 && selected < count) ? selected : 0;
+        int count = obj->data.combo.option_count;
+        obj->data.combo.selected_index = (selected >= 0 && selected < count) ? selected : -1;
     }
 
     imgui_push_handle(L, child, IMGUI_OBJ_COMBO);
@@ -987,9 +1074,9 @@ static int imgui_window_add_slider(lua_State *L) {
 
     ImguiObject *obj = imgui_object_get(child);
     if (obj) {
-        obj->data.slider.value.x = value;
-        obj->data.slider.min.x = min_val;
-        obj->data.slider.max.x = max_val;
+        imgui_fill_vec4(&obj->data.slider.value, value);
+        imgui_fill_vec4(&obj->data.slider.min, min_val);
+        imgui_fill_vec4(&obj->data.slider.max, max_val);
         obj->data.slider.components = 1;
     }
 
@@ -1014,9 +1101,9 @@ static int imgui_window_add_sliderint(lua_State *L) {
 
     ImguiObject *obj = imgui_object_get(child);
     if (obj) {
-        obj->data.slider_int.value[0] = value;
-        obj->data.slider_int.min[0] = min_val;
-        obj->data.slider_int.max[0] = max_val;
+        imgui_fill_ivec4(obj->data.slider_int.value, value);
+        imgui_fill_ivec4(obj->data.slider_int.min, min_val);
+        imgui_fill_ivec4(obj->data.slider_int.max, max_val);
         obj->data.slider_int.components = 1;
     }
 
@@ -1097,16 +1184,40 @@ static int imgui_window_add_radiobutton(lua_State *L) {
     return 1;
 }
 
+/*
+ * Upstream: AddColorEdit/AddColorPicker(label, vec3?) -- the optional colour
+ * is an {r, g, b} table and Color becomes vec4(rgb, 1.0). MCM's colour
+ * widgets and EasyCheat's theme editor pass that table; this port took four
+ * bare numbers, so every one of those calls threw "number expected, got
+ * table". Accept the table (an {r,g,b,a} table keeps its alpha) and keep the
+ * old scalar form as a convenience.
+ */
+static ImguiVec4 imgui_color_args(lua_State *L, int idx) {
+    ImguiVec4 c = {1.0f, 1.0f, 1.0f, 1.0f};
+    if (lua_type(L, idx) == LUA_TTABLE) {
+        float *lanes[4] = { &c.x, &c.y, &c.z, &c.w };
+        for (int i = 0; i < 4; i++) {
+            if (lua_rawgeti(L, idx, i + 1) == LUA_TNUMBER) {
+                *lanes[i] = (float)lua_tonumber(L, -1);
+            }
+            lua_pop(L, 1);
+        }
+        return c;
+    }
+    c.x = (float)luaL_optnumber(L, idx, 1.0);
+    c.y = (float)luaL_optnumber(L, idx + 1, 1.0);
+    c.z = (float)luaL_optnumber(L, idx + 2, 1.0);
+    c.w = (float)luaL_optnumber(L, idx + 3, 1.0);
+    return c;
+}
+
 /**
- * window:AddColorEdit(label, [r, g, b, a]) -> color edit widget
+ * window:AddColorEdit(label, [{r, g, b[, a]}]) -> color edit widget
  */
 static int imgui_window_add_coloredit(lua_State *L) {
     ImguiUserdata *ud = imgui_to_userdata(L, 1);
     const char *label = imgui_str_arg(L, 2, __func__);
-    float r = (float)luaL_optnumber(L, 3, 1.0);
-    float g = (float)luaL_optnumber(L, 4, 1.0);
-    float b = (float)luaL_optnumber(L, 5, 1.0);
-    float a = (float)luaL_optnumber(L, 6, 1.0);
+    ImguiVec4 color = imgui_color_args(L, 3);
 
     ImguiHandle child = imgui_object_create_child(ud->handle, IMGUI_OBJ_COLOR_EDIT, label);
     if (child == IMGUI_INVALID_HANDLE) {
@@ -1115,7 +1226,7 @@ static int imgui_window_add_coloredit(lua_State *L) {
 
     ImguiObject *obj = imgui_object_get(child);
     if (obj) {
-        obj->data.color.color = (ImguiVec4){r, g, b, a};
+        obj->data.color.color = color;
     }
 
     imgui_push_handle(L, child, IMGUI_OBJ_COLOR_EDIT);
@@ -1123,15 +1234,12 @@ static int imgui_window_add_coloredit(lua_State *L) {
 }
 
 /**
- * window:AddColorPicker(label, [r, g, b, a]) -> color picker widget
+ * window:AddColorPicker(label, [{r, g, b[, a]}]) -> color picker widget
  */
 static int imgui_window_add_colorpicker(lua_State *L) {
     ImguiUserdata *ud = imgui_to_userdata(L, 1);
     const char *label = imgui_str_arg(L, 2, __func__);
-    float r = (float)luaL_optnumber(L, 3, 1.0);
-    float g = (float)luaL_optnumber(L, 4, 1.0);
-    float b = (float)luaL_optnumber(L, 5, 1.0);
-    float a = (float)luaL_optnumber(L, 6, 1.0);
+    ImguiVec4 color = imgui_color_args(L, 3);
 
     ImguiHandle child = imgui_object_create_child(ud->handle, IMGUI_OBJ_COLOR_PICKER, label);
     if (child == IMGUI_INVALID_HANDLE) {
@@ -1140,7 +1248,7 @@ static int imgui_window_add_colorpicker(lua_State *L) {
 
     ImguiObject *obj = imgui_object_get(child);
     if (obj) {
-        obj->data.color.color = (ImguiVec4){r, g, b, a};
+        obj->data.color.color = color;
     }
 
     imgui_push_handle(L, child, IMGUI_OBJ_COLOR_PICKER);
@@ -1164,9 +1272,9 @@ static int imgui_window_add_drag(lua_State *L) {
 
     ImguiObject *obj = imgui_object_get(child);
     if (obj) {
-        obj->data.slider.value.x = value;
-        obj->data.slider.min.x = min_val;
-        obj->data.slider.max.x = max_val;
+        imgui_fill_vec4(&obj->data.slider.value, value);
+        imgui_fill_vec4(&obj->data.slider.min, min_val);
+        imgui_fill_vec4(&obj->data.slider.max, max_val);
         obj->data.slider.components = 1;
     }
 
@@ -1191,9 +1299,9 @@ static int imgui_window_add_dragint(lua_State *L) {
 
     ImguiObject *obj = imgui_object_get(child);
     if (obj) {
-        obj->data.slider_int.value[0] = value;
-        obj->data.slider_int.min[0] = min_val;
-        obj->data.slider_int.max[0] = max_val;
+        imgui_fill_ivec4(obj->data.slider_int.value, value);
+        imgui_fill_ivec4(obj->data.slider_int.min, min_val);
+        imgui_fill_ivec4(obj->data.slider_int.max, max_val);
         obj->data.slider_int.components = 1;
     }
 
@@ -1225,7 +1333,8 @@ static int imgui_window_add_inputscalar(lua_State *L) {
 
     ImguiObject *obj = imgui_object_get(child);
     if (obj) {
-        obj->data.slider.value.x = value;
+        imgui_fill_vec4(&obj->data.slider.value, value);
+        obj->data.slider.components = 1;
     }
 
     imgui_push_handle(L, child, IMGUI_OBJ_INPUT_SCALAR);
@@ -1260,7 +1369,7 @@ static int imgui_window_add_inputint(lua_State *L) {
 
     ImguiObject *obj = imgui_object_get(child);
     if (obj) {
-        obj->data.slider_int.value[0] = value;
+        imgui_fill_ivec4(obj->data.slider_int.value, value);
         obj->data.slider_int.components = 1;
     }
 
@@ -2274,8 +2383,26 @@ static int imgui_widget_index(lua_State *L) {
             break;
 
         case IMGUI_OBJ_COMBO:
+            /*
+             * SelectedIndex is 0-based and -1 means nothing selected, exactly
+             * as upstream's Combo exposes its C++ int. Mods convert at the
+             * boundary themselves -- MCM: `SelectedIndex = i - 1` and
+             * `Options[value.SelectedIndex + 1]`; BG3SX the same -- so the +1
+             * this port used to apply put every combo one entry off and made
+             * "select the first option" (= 0) select nothing.
+             */
             if (strcmp(key, "SelectedIndex") == 0) {
-                lua_pushinteger(L, obj->data.combo.selected_index + 1);  // Lua 1-indexed
+                lua_pushinteger(L, obj->data.combo.selected_index);
+                return 1;
+            }
+            if (strcmp(key, "Options") == 0) {
+                imgui_objects_lock();
+                lua_createtable(L, obj->data.combo.option_count, 0);
+                for (int i = 0; i < obj->data.combo.option_count; i++) {
+                    lua_pushstring(L, obj->data.combo.options[i] ? obj->data.combo.options[i] : "");
+                    lua_rawseti(L, -2, i + 1);
+                }
+                imgui_objects_unlock();
                 return 1;
             }
             if (strcmp(key, "Flags") == 0) {
@@ -2286,16 +2413,37 @@ static int imgui_widget_index(lua_State *L) {
 
         case IMGUI_OBJ_SLIDER_SCALAR:
         case IMGUI_OBJ_DRAG_SCALAR:
+        case IMGUI_OBJ_INPUT_SCALAR:
+            // vec4 lanes -- see imgui_set_vec4_lanes for why these are arrays.
             if (strcmp(key, "Value") == 0) {
-                lua_pushnumber(L, obj->data.slider.value.x);
+                imgui_push_vec4(L, obj->data.slider.value.x, obj->data.slider.value.y,
+                               obj->data.slider.value.z, obj->data.slider.value.w);
                 return 1;
             }
             if (strcmp(key, "Min") == 0) {
-                lua_pushnumber(L, obj->data.slider.min.x);
+                imgui_push_vec4(L, obj->data.slider.min.x, obj->data.slider.min.y,
+                               obj->data.slider.min.z, obj->data.slider.min.w);
                 return 1;
             }
             if (strcmp(key, "Max") == 0) {
-                lua_pushnumber(L, obj->data.slider.max.x);
+                imgui_push_vec4(L, obj->data.slider.max.x, obj->data.slider.max.y,
+                               obj->data.slider.max.z, obj->data.slider.max.w);
+                return 1;
+            }
+            if (strcmp(key, "Components") == 0) {
+                lua_pushinteger(L, obj->data.slider.components);
+                return 1;
+            }
+            if (strcmp(key, "Flags") == 0) {
+                lua_pushinteger(L, obj->data.slider.flags);
+                return 1;
+            }
+            if (strcmp(key, "Vertical") == 0) {
+                lua_pushboolean(L, obj->data.slider.is_vertical);
+                return 1;
+            }
+            if (strcmp(key, "VerticalSize") == 0) {
+                imgui_push_vec2(L, obj->data.slider.vertical_size.x, obj->data.slider.vertical_size.y);
                 return 1;
             }
             break;
@@ -2304,15 +2452,31 @@ static int imgui_widget_index(lua_State *L) {
         case IMGUI_OBJ_DRAG_INT:
         case IMGUI_OBJ_INPUT_INT:
             if (strcmp(key, "Value") == 0) {
-                lua_pushinteger(L, obj->data.slider_int.value[0]);
+                imgui_push_ivec4(L, obj->data.slider_int.value);
                 return 1;
             }
             if (strcmp(key, "Min") == 0) {
-                lua_pushinteger(L, obj->data.slider_int.min[0]);
+                imgui_push_ivec4(L, obj->data.slider_int.min);
                 return 1;
             }
             if (strcmp(key, "Max") == 0) {
-                lua_pushinteger(L, obj->data.slider_int.max[0]);
+                imgui_push_ivec4(L, obj->data.slider_int.max);
+                return 1;
+            }
+            if (strcmp(key, "Components") == 0) {
+                lua_pushinteger(L, obj->data.slider_int.components);
+                return 1;
+            }
+            if (strcmp(key, "Flags") == 0) {
+                lua_pushinteger(L, obj->data.slider_int.flags);
+                return 1;
+            }
+            if (strcmp(key, "Vertical") == 0) {
+                lua_pushboolean(L, obj->data.slider_int.is_vertical);
+                return 1;
+            }
+            if (strcmp(key, "VerticalSize") == 0) {
+                imgui_push_vec2(L, obj->data.slider_int.vertical_size.x, obj->data.slider_int.vertical_size.y);
                 return 1;
             }
             break;
@@ -2534,7 +2698,12 @@ static int imgui_widget_newindex(lua_State *L) {
 
         case IMGUI_OBJ_COMBO:
             if (strcmp(key, "SelectedIndex") == 0) {
-                obj->data.combo.selected_index = (int)luaL_checkinteger(L, 3) - 1;  // Lua 1-indexed
+                // 0-based, -1 = none (upstream Combo::SelectedIndex); see the getter.
+                obj->data.combo.selected_index = (int)luaL_checkinteger(L, 3);
+                return 0;
+            }
+            if (strcmp(key, "Options") == 0) {
+                imgui_combo_set_options(L, obj, 3);
                 return 0;
             }
             if (strcmp(key, "Flags") == 0) {
@@ -2545,16 +2714,34 @@ static int imgui_widget_newindex(lua_State *L) {
 
         case IMGUI_OBJ_SLIDER_SCALAR:
         case IMGUI_OBJ_DRAG_SCALAR:
+        case IMGUI_OBJ_INPUT_SCALAR:
             if (strcmp(key, "Value") == 0) {
-                obj->data.slider.value.x = (float)luaL_checknumber(L, 3);
+                imgui_set_vec4_lanes(L, 3, &obj->data.slider.value);
                 return 0;
             }
             if (strcmp(key, "Min") == 0) {
-                obj->data.slider.min.x = (float)luaL_checknumber(L, 3);
+                imgui_set_vec4_lanes(L, 3, &obj->data.slider.min);
                 return 0;
             }
             if (strcmp(key, "Max") == 0) {
-                obj->data.slider.max.x = (float)luaL_checknumber(L, 3);
+                imgui_set_vec4_lanes(L, 3, &obj->data.slider.max);
+                return 0;
+            }
+            if (strcmp(key, "Components") == 0) {
+                int n = (int)luaL_checkinteger(L, 3);
+                obj->data.slider.components = n < 1 ? 1 : (n > 4 ? 4 : n);
+                return 0;
+            }
+            if (strcmp(key, "Flags") == 0) {
+                obj->data.slider.flags = (uint32_t)luaL_checkinteger(L, 3);
+                return 0;
+            }
+            if (strcmp(key, "Vertical") == 0) {
+                obj->data.slider.is_vertical = lua_toboolean(L, 3);
+                return 0;
+            }
+            if (strcmp(key, "VerticalSize") == 0) {
+                imgui_get_vec2(L, 3, &obj->data.slider.vertical_size.x, &obj->data.slider.vertical_size.y);
                 return 0;
             }
             break;
@@ -2563,15 +2750,32 @@ static int imgui_widget_newindex(lua_State *L) {
         case IMGUI_OBJ_DRAG_INT:
         case IMGUI_OBJ_INPUT_INT:
             if (strcmp(key, "Value") == 0) {
-                obj->data.slider_int.value[0] = (int)luaL_checkinteger(L, 3);
+                imgui_set_ivec4_lanes(L, 3, obj->data.slider_int.value);
                 return 0;
             }
             if (strcmp(key, "Min") == 0) {
-                obj->data.slider_int.min[0] = (int)luaL_checkinteger(L, 3);
+                imgui_set_ivec4_lanes(L, 3, obj->data.slider_int.min);
                 return 0;
             }
             if (strcmp(key, "Max") == 0) {
-                obj->data.slider_int.max[0] = (int)luaL_checkinteger(L, 3);
+                imgui_set_ivec4_lanes(L, 3, obj->data.slider_int.max);
+                return 0;
+            }
+            if (strcmp(key, "Components") == 0) {
+                int n = (int)luaL_checkinteger(L, 3);
+                obj->data.slider_int.components = n < 1 ? 1 : (n > 4 ? 4 : n);
+                return 0;
+            }
+            if (strcmp(key, "Flags") == 0) {
+                obj->data.slider_int.flags = (uint32_t)luaL_checkinteger(L, 3);
+                return 0;
+            }
+            if (strcmp(key, "Vertical") == 0) {
+                obj->data.slider_int.is_vertical = lua_toboolean(L, 3);
+                return 0;
+            }
+            if (strcmp(key, "VerticalSize") == 0) {
+                imgui_get_vec2(L, 3, &obj->data.slider_int.vertical_size.x, &obj->data.slider_int.vertical_size.y);
                 return 0;
             }
             break;
@@ -2579,15 +2783,8 @@ static int imgui_widget_newindex(lua_State *L) {
         case IMGUI_OBJ_COLOR_EDIT:
         case IMGUI_OBJ_COLOR_PICKER:
             if (strcmp(key, "Color") == 0 || strcmp(key, "Value") == 0) {
-                if (lua_istable(L, 3)) {
-                    float x, y, z, w;
-                    if (imgui_get_vec4(L, 3, &x, &y, &z, &w)) {
-                        obj->data.color.color.x = x;
-                        obj->data.color.color.y = y;
-                        obj->data.color.color.z = z;
-                        obj->data.color.color.w = w;
-                    }
-                }
+                // vec4 upstream; an {r,g,b} table leaves alpha untouched
+                imgui_set_vec4_lanes(L, 3, &obj->data.color.color);
                 return 0;
             }
             if (strcmp(key, "Flags") == 0) {
@@ -3209,11 +3406,43 @@ void lua_imgui_register(lua_State *L, int ext_idx) {
 // the game's own rendering and main-thread Lua — MCM's OnClose (which emits a
 // mod event) crashed the game in ls::Scene::Cull. So enqueue events here and run
 // them on the main thread via lua_imgui_process_events().
+/*
+ * OnChange's second argument is the widget's new value, typed per widget as
+ * upstream declares its delegates (Objects.h):
+ *
+ *   Checkbox / RadioButton      OnChange(handle, bool)
+ *   Combo                       OnChange(handle, int)      -- SelectedIndex
+ *   InputText                   OnChange(handle, string)
+ *   Slider/Drag/InputScalar     OnChange(handle, vec4)
+ *   SliderInt/DragInt/InputInt  OnChange(handle, ivec4)
+ *   ColorEdit / ColorPicker     OnChange(handle, vec4)
+ *
+ * The port used to pass a boolean for every widget. Most mods read the value
+ * back off the handle instead, which is why it went unnoticed, but MCM's
+ * profile combo and any mod written to the documented signature got garbage.
+ * The payload is snapshotted here, on the render thread, straight after the
+ * ImGui call wrote it, so a burst of drags queued in one tick each carry
+ * their own value rather than all reporting the last one.
+ */
+typedef enum {
+    IMGUI_ARG_NONE = 0,
+    IMGUI_ARG_BOOL,
+    IMGUI_ARG_INT,
+    IMGUI_ARG_STRING,
+    IMGUI_ARG_VEC4,
+    IMGUI_ARG_IVEC4,
+} ImguiEventArgKind;
+
 typedef struct {
     ImguiHandle handle;
     ImguiEventType event;
-    int has_arg;
-    int arg;
+    ImguiEventArgKind kind;
+    union {
+        int i;
+        float f[4];
+        int iv[4];
+        char *s;   // strdup'd; freed after the callback runs (or on drop)
+    } arg;
 } ImguiQueuedEvent;
 
 #define IMGUI_EVENT_QUEUE_MAX 512
@@ -3222,26 +3451,81 @@ static int s_imgui_event_head = 0;
 static int s_imgui_event_tail = 0;
 static pthread_mutex_t s_imgui_event_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void lua_imgui_fire_event(ImguiHandle handle, ImguiEventType event, ...) {
-    int has_arg = 0, arg = 0;
-    if (event == IMGUI_EVENT_ON_CHANGE) {
-        va_list args;
-        va_start(args, event);
-        arg = va_arg(args, int);
-        va_end(args);
-        has_arg = 1;
+static void imgui_event_snapshot_arg(ImguiQueuedEvent *ev) {
+    ev->kind = IMGUI_ARG_NONE;
+    if (ev->event != IMGUI_EVENT_ON_CHANGE) return;
+    ImguiObject *obj = imgui_object_get(ev->handle);
+    if (!obj) return;
+
+    switch (obj->type) {
+        case IMGUI_OBJ_CHECKBOX:
+            ev->kind = IMGUI_ARG_BOOL;
+            ev->arg.i = obj->data.checkbox.checked;
+            break;
+        case IMGUI_OBJ_RADIO_BUTTON:
+            ev->kind = IMGUI_ARG_BOOL;
+            ev->arg.i = obj->data.radio_button.active;
+            break;
+        case IMGUI_OBJ_COMBO:
+            ev->kind = IMGUI_ARG_INT;
+            ev->arg.i = obj->data.combo.selected_index;
+            break;
+        case IMGUI_OBJ_INPUT_TEXT:
+            ev->kind = IMGUI_ARG_STRING;
+            ev->arg.s = strdup(obj->data.input_text.text);
+            break;
+        case IMGUI_OBJ_SLIDER_SCALAR:
+        case IMGUI_OBJ_DRAG_SCALAR:
+        case IMGUI_OBJ_INPUT_SCALAR:
+            ev->kind = IMGUI_ARG_VEC4;
+            ev->arg.f[0] = obj->data.slider.value.x;
+            ev->arg.f[1] = obj->data.slider.value.y;
+            ev->arg.f[2] = obj->data.slider.value.z;
+            ev->arg.f[3] = obj->data.slider.value.w;
+            break;
+        case IMGUI_OBJ_SLIDER_INT:
+        case IMGUI_OBJ_DRAG_INT:
+        case IMGUI_OBJ_INPUT_INT:
+            ev->kind = IMGUI_ARG_IVEC4;
+            memcpy(ev->arg.iv, obj->data.slider_int.value, sizeof(ev->arg.iv));
+            break;
+        case IMGUI_OBJ_COLOR_EDIT:
+        case IMGUI_OBJ_COLOR_PICKER:
+            ev->kind = IMGUI_ARG_VEC4;
+            ev->arg.f[0] = obj->data.color.color.x;
+            ev->arg.f[1] = obj->data.color.color.y;
+            ev->arg.f[2] = obj->data.color.color.z;
+            ev->arg.f[3] = obj->data.color.color.w;
+            break;
+        default:
+            break;
     }
+}
+
+static void imgui_event_release_arg(ImguiQueuedEvent *ev) {
+    if (ev->kind == IMGUI_ARG_STRING) {
+        free(ev->arg.s);
+        ev->arg.s = NULL;
+    }
+    ev->kind = IMGUI_ARG_NONE;
+}
+
+void lua_imgui_fire_event(ImguiHandle handle, ImguiEventType event) {
+    ImguiQueuedEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.handle = handle;
+    ev.event = event;
+    imgui_event_snapshot_arg(&ev);
 
     pthread_mutex_lock(&s_imgui_event_mutex);
     int next = (s_imgui_event_tail + 1) % IMGUI_EVENT_QUEUE_MAX;
     if (next != s_imgui_event_head) {  // drop if full rather than block the render thread
-        s_imgui_event_queue[s_imgui_event_tail].handle = handle;
-        s_imgui_event_queue[s_imgui_event_tail].event = event;
-        s_imgui_event_queue[s_imgui_event_tail].has_arg = has_arg;
-        s_imgui_event_queue[s_imgui_event_tail].arg = arg;
+        s_imgui_event_queue[s_imgui_event_tail] = ev;
         s_imgui_event_tail = next;
+        ev.kind = IMGUI_ARG_NONE;  // ownership moved to the queue
     }
     pthread_mutex_unlock(&s_imgui_event_mutex);
+    imgui_event_release_arg(&ev);  // no-op unless the event was dropped
 }
 
 // Run a single queued event's Lua callback (main thread only, caller holds
@@ -3266,9 +3550,18 @@ static void imgui_run_event(lua_State *L, const ImguiQueuedEvent *ev) {
         lua_pushnil(L);
     }
     int nargs = 1;
-    if (ev->has_arg) {
-        lua_pushboolean(L, ev->arg);
-        nargs++;
+    switch (ev->kind) {
+        case IMGUI_ARG_BOOL:   lua_pushboolean(L, ev->arg.i); nargs++; break;
+        case IMGUI_ARG_INT:    lua_pushinteger(L, ev->arg.i); nargs++; break;
+        case IMGUI_ARG_STRING: lua_pushstring(L, ev->arg.s ? ev->arg.s : ""); nargs++; break;
+        case IMGUI_ARG_VEC4:
+            imgui_push_vec4(L, ev->arg.f[0], ev->arg.f[1], ev->arg.f[2], ev->arg.f[3]);
+            nargs++;
+            break;
+        case IMGUI_ARG_IVEC4:  imgui_push_ivec4(L, ev->arg.iv); nargs++; break;
+        case IMGUI_ARG_NONE:
+        default:
+            break;
     }
     if (lua_pcall(L, nargs, 0, 0) != LUA_OK) {
         const char *err = lua_tostring(L, -1);
@@ -3294,6 +3587,7 @@ void lua_imgui_process_events(lua_State *L) {
         s_imgui_event_head = (s_imgui_event_head + 1) % IMGUI_EVENT_QUEUE_MAX;
         pthread_mutex_unlock(&s_imgui_event_mutex);
         imgui_run_event(L, &ev);
+        imgui_event_release_arg(&ev);
     }
 }
 

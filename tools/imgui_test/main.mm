@@ -476,7 +476,7 @@ static void render_test_control_window(void) {
             if (ImGui::Button("Create Combo Test")) {
                 run_lua_string(
                     "local w = Ext.IMGUI.NewWindow(\"Combo Test\")\n"
-                    "local combo = w:AddCombo(\"Select\", {\"Option A\", \"Option B\", \"Option C\"}, 1)\n"
+                    "local combo = w:AddCombo(\"Select\", {\"Option A\", \"Option B\", \"Option C\"}, 0)\n"
                     "combo.OnChange = function(widget)\n"
                     "    Ext.Print(\"Selected index: \" .. widget.SelectedIndex)\n"
                     "end"
@@ -488,7 +488,7 @@ static void render_test_control_window(void) {
                     "local w = Ext.IMGUI.NewWindow(\"Slider Test\")\n"
                     "local slider = w:AddSlider(\"Value\", 50, 0, 100)\n"
                     "slider.OnChange = function(widget)\n"
-                    "    Ext.Print(\"Slider value: \" .. widget.Value)\n"
+                    "    Ext.Print(\"Slider value: \" .. widget.Value[1])\n"
                     "end"
                 );
             }

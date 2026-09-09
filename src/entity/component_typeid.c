@@ -43,11 +43,13 @@ static const TypeIdEntry g_KnownTypeIds[] = {
 
     // =====================================================================
     // esv:: proxy components: the ECS slot holds a pointer to the object
-    // (esv::Item is 0xb0 bytes; upstream GameDefinitions/Item.h). Exposed as
-    // ServerItem for Windows parity. (esv::Character stays unregistered until
-    // its layout is verified; the placeholder in component_offsets.h is not.)
+    // (esv::Item is 0xb0 bytes, esv::Character 0x1a8; upstream
+    // GameDefinitions/Item.h and Character.h, both layouts verified live in
+    // component_offsets.h). Exposed as ServerItem / ServerCharacter for
+    // Windows parity.
     // =====================================================================
     { "esv::Item", 0, true, "ecs::ComponentTypeIdContext", false },
+    { "esv::Character", 0, true, "ecs::ComponentTypeIdContext", false },
 
     // =====================================================================
     // eoc:: namespace (engine of combat)

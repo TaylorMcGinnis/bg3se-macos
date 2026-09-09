@@ -39,7 +39,7 @@ static int enum_index(lua_State *L) {
         if (label) {
             lua_pushstring(L, label);
         } else {
-            lua_pushfstring(L, "Unknown(%llu)", (unsigned long long)ud->value);
+            lua_pushfstring(L, "Unknown(%I)", (lua_Integer)ud->value);
         }
         return 1;
     }
@@ -104,9 +104,9 @@ static int enum_tostring(lua_State *L) {
     } else {
         EnumTypeInfo *info = enum_registry_get(ud->type_index);
         if (info) {
-            lua_pushfstring(L, "%s(%llu)", info->name, (unsigned long long)ud->value);
+            lua_pushfstring(L, "%s(%I)", info->name, (lua_Integer)ud->value);
         } else {
-            lua_pushfstring(L, "Enum(%llu)", (unsigned long long)ud->value);
+            lua_pushfstring(L, "Enum(%I)", (lua_Integer)ud->value);
         }
     }
     return 1;

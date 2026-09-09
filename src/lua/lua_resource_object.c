@@ -1065,8 +1065,8 @@ static int write_array_from_table(lua_State *L, void *addr, const ResourceField 
                 if (!safe_memory_read_u8((mach_vm_address_t)o, &(uint8_t){0})
                     || !safe_memory_read_u8((mach_vm_address_t)((const uint8_t *)o + esize - 1),
                                             &(uint8_t){0})) {
-                    return luaL_error(L, "field '%s': source element %u is not readable",
-                                      field->name, i);
+                    return luaL_error(L, "field '%s': source element %d is not readable",
+                                      field->name, (int)i);
                 }
                 if (field->kind == RF_ARRAY_STRUCT) {
                     copy_struct_element(d, o, field->elem, esize);
