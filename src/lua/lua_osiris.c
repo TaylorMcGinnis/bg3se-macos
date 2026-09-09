@@ -9,6 +9,7 @@
 #include "custom_functions.h"
 #include "logging.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 // ============================================================================
@@ -39,8 +40,25 @@ static int check_osiris_context(const char *operation) {
 // Internal State
 // ============================================================================
 
-static OsirisListener osiris_listeners[MAX_OSIRIS_LISTENERS];
+// Growable: upstream's OsirisCallbackManager has no subscription cap, and a
+// large mod profile registers well over the old fixed 512 (Wave 5 exhausted
+// 64; the 744-mod profile in bg3se-nominal-limits broke every fixed cap).
+static OsirisListener *osiris_listeners = NULL;
 static int osiris_listener_count = 0;
+static int osiris_listener_capacity = 0;
+
+static OsirisListener *osiris_listener_alloc(void) {
+    if (osiris_listener_count >= osiris_listener_capacity) {
+        int cap = osiris_listener_capacity ? osiris_listener_capacity * 2
+                                           : MAX_OSIRIS_LISTENERS;
+        OsirisListener *grown = realloc(osiris_listeners,
+                                        (size_t)cap * sizeof(OsirisListener));
+        if (!grown) return NULL;
+        osiris_listeners = grown;
+        osiris_listener_capacity = cap;
+    }
+    return &osiris_listeners[osiris_listener_count];
+}
 
 // ============================================================================
 // Lua C API Functions
@@ -54,15 +72,21 @@ int lua_ext_osiris_registerlistener(lua_State *L) {
     const char *timing = luaL_checkstring(L, 3);
     luaL_checktype(L, 4, LUA_TFUNCTION);
 
-    if (osiris_listener_count >= MAX_OSIRIS_LISTENERS) {
-        // A silent zero-return here reads as success-with-nil to mods; fail
-        // loudly so the caller (and our compat assertions) see the real cause.
-        return luaL_error(L, "RegisterListener: listener table full (%d)",
-                          MAX_OSIRIS_LISTENERS);
+    // Upstream RegisterOsirisListener (Lua/Server/LuaServer.cpp) accepts
+    // exactly these four hook types and raises for anything else; a typo
+    // here used to register a listener that could never fire.
+    if (strcmp(timing, "before") != 0 && strcmp(timing, "after") != 0 &&
+        strcmp(timing, "beforeDelete") != 0 && strcmp(timing, "afterDelete") != 0) {
+        return luaL_error(L, "Hook type must be 'before', 'beforeDelete', 'after' or 'afterDelete'");
+    }
+
+    OsirisListener *listener = osiris_listener_alloc();
+    if (!listener) {
+        return luaL_error(L, "RegisterListener: out of memory growing the listener table (%d)",
+                          osiris_listener_count);
     }
 
     // Store the listener
-    OsirisListener *listener = &osiris_listeners[osiris_listener_count];
     strncpy(listener->event_name, event, sizeof(listener->event_name) - 1);
     listener->event_name[sizeof(listener->event_name) - 1] = '\0';
     listener->arity = arity;
@@ -78,9 +102,31 @@ int lua_ext_osiris_registerlistener(lua_State *L) {
     LOG_LUA_DEBUG("Registered Osiris listener: %s (arity=%d, timing=%s)",
                 event, arity, timing);
 
-    // Return the 1-based listener index as a subscription handle so callers
-    // can hold on to their registration (tier-2 Parity.Osi.ListenerBeforeAfter).
+    // Return the 1-based listener index as the subscription id (what
+    // UnregisterListener takes), like upstream's SubscriptionId.
     lua_pushinteger(L, osiris_listener_count);
+    return 1;
+}
+
+int lua_ext_osiris_unregisterlistener(lua_State *L) {
+    lua_Integer id = luaL_checkinteger(L, 1);
+
+    // Tombstone rather than compact: ids are table indices, and a dispatch
+    // loop may be walking the table when a handler unregisters itself.
+    if (id < 1 || id > osiris_listener_count ||
+        osiris_listeners[id - 1].callback_ref == LUA_NOREF) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+
+    OsirisListener *listener = &osiris_listeners[id - 1];
+    luaL_unref(L, LUA_REGISTRYINDEX, listener->callback_ref);
+    listener->callback_ref = LUA_NOREF;
+
+    LOG_LUA_DEBUG("Unregistered Osiris listener #%lld: %s (arity=%d, timing=%s)",
+                  (long long)id, listener->event_name, listener->arity, listener->timing);
+
+    lua_pushboolean(L, 1);
     return 1;
 }
 
@@ -201,27 +247,33 @@ int lua_ext_osiris_raiseevent(lua_State *L) {
         // Match by event name (timing doesn't matter for custom events - call both "before" and "after")
         if (strcmp(listener->event_name, eventName) != 0) continue;
 
+        // The handler may register a listener (reallocating the table), so
+        // take what we need before calling into Lua.
+        int callback_ref = listener->callback_ref;
+        int argsToPass = (listener->arity < nargs) ? listener->arity : nargs;
+
         // Get callback from Lua registry
-        lua_rawgeti(L, LUA_REGISTRYINDEX, listener->callback_ref);
+        lua_pushcfunction(L, lua_osiris_traceback_msgh);
+        int msgh = lua_gettop(L);
+        lua_rawgeti(L, LUA_REGISTRYINDEX, callback_ref);
         if (!lua_isfunction(L, -1)) {
-            lua_pop(L, 1);
+            lua_pop(L, 2);
             continue;
         }
 
         // Push arguments (up to listener's requested arity)
-        int argsToPass = (listener->arity < nargs) ? listener->arity : nargs;
         for (int j = 0; j < argsToPass; j++) {
             lua_pushvalue(L, j + 2);  // +2 because arg 1 is eventName
         }
 
         // Call the callback
-        if (lua_pcall(L, argsToPass, 0, 0) != LUA_OK) {
-            LOG_OSIRIS_ERROR("RaiseEvent callback error for %s: %s",
-                       eventName, lua_tostring(L, -1));
+        if (lua_pcall(L, argsToPass, 0, msgh) != LUA_OK) {
+            LOG_OSIRIS_ERROR("Osiris event handler failed: %s", lua_tostring(L, -1));
             lua_pop(L, 1);
         } else {
             dispatched++;
         }
+        lua_remove(L, msgh);
     }
 
     LOG_LUA_DEBUG("RaiseEvent: '%s' dispatched to %d listeners", eventName, dispatched);
@@ -298,14 +350,39 @@ OsirisListener *lua_osiris_get_listener(int index) {
     if (index < 0 || index >= osiris_listener_count) {
         return NULL;
     }
+    if (osiris_listeners[index].callback_ref == LUA_NOREF) {
+        return NULL;   /* unregistered */
+    }
     return &osiris_listeners[index];
 }
 
-void lua_osiris_reset_listeners(void) {
-    // Currently uncalled. If this is ever wired up (e.g. session teardown),
-    // the stored callback_refs must be luaL_unref'd against the owning
-    // lua_State first — zeroing the count alone leaks up to
-    // MAX_OSIRIS_LISTENERS registry entries per reset.
+int lua_osiris_traceback_msgh(lua_State *L) {
+    // Upstream CallWithTraceback: append the Lua traceback to the message so
+    // "Osiris event handler failed:" names the mod line, not just the error.
+    const char *msg = lua_tostring(L, 1);
+    if (msg) {
+        luaL_traceback(L, L, msg, 1);
+    } else if (!lua_isnoneornil(L, 1)) {
+        if (!luaL_callmeta(L, 1, "__tostring")) {
+            lua_pushfstring(L, "(error object is a %s value)", luaL_typename(L, 1));
+        }
+    } else {
+        lua_pushstring(L, "(nil error)");
+    }
+    return 1;
+}
+
+void lua_osiris_reset_listeners(lua_State *L) {
+    // Currently uncalled (the server VM is not recreated per session yet).
+    // Releases every registry reference so a reset doesn't leak them.
+    if (L) {
+        for (int i = 0; i < osiris_listener_count; i++) {
+            if (osiris_listeners[i].callback_ref != LUA_NOREF) {
+                luaL_unref(L, LUA_REGISTRYINDEX, osiris_listeners[i].callback_ref);
+                osiris_listeners[i].callback_ref = LUA_NOREF;
+            }
+        }
+    }
     osiris_listener_count = 0;
 }
 
@@ -329,6 +406,9 @@ void lua_osiris_register(lua_State *L) {
 
     lua_pushcfunction(L, lua_ext_osiris_registerlistener);
     lua_setfield(L, -2, "RegisterListener");
+
+    lua_pushcfunction(L, lua_ext_osiris_unregisterlistener);
+    lua_setfield(L, -2, "UnregisterListener");
 
     lua_pushcfunction(L, lua_ext_osiris_newcall);
     lua_setfield(L, -2, "NewCall");

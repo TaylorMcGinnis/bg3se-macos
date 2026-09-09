@@ -1,13 +1,24 @@
 /**
  * timer.c - Timer system implementation
  *
- * Uses a fixed-size timer pool and a min-heap priority queue for efficient
- * "get next timer to fire" operations. Timers store Lua callback references
- * via luaL_ref to prevent garbage collection.
+ * Uses a growable, salted timer pool (upstream's SaltedPool<EphemeralTimer>)
+ * and a growable min-heap priority queue for efficient "get next timer to
+ * fire" operations. Timers store Lua callback references via luaL_ref to
+ * prevent garbage collection.
+ *
+ * The pool used to be a fixed 256 slots keyed by bare index. A 744-mod load
+ * order blew through that inside one LevelGameplayStarted burst
+ * (ManyMoreMonsters, CleanMyHotbar, BG3SX Helper:543 all got "pool
+ * exhausted"), and the bare-index handles meant a cancelled slot that was
+ * reused answered to the old handle: a mod's stale Cancel() killed the new
+ * timer, and the old slot's still-queued heap entry (invoke_id 0 == 0) fired
+ * the new timer early. Handles now carry a per-slot salt that is bumped on
+ * every free, so a recycled slot never matches an old handle.
  */
 
 #include "timer.h"
 #include "../core/logging.h"
+#include "../lifetime/lifetime.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +35,7 @@ typedef struct {
     double repeat_interval;  // 0 for one-shot, >0 for repeating (ms)
     int callback_ref;        // Lua registry reference (LUA_NOREF if inactive)
     uint32_t invoke_id;      // Incremented on pause/resume to invalidate stale queue entries
+    uint32_t salt;           // Bumped on every free; part of the handle (see timer_make_handle)
     bool paused;
     bool active;             // Slot in use
 } Timer;
@@ -42,14 +54,33 @@ typedef struct {
 // Static State
 // ============================================================================
 
-// Timer pool
-static Timer s_timers[TIMER_MAX_COUNT];
+// Timer pool: slots [0, s_timer_used) have been handed out at least once;
+// s_free_indices is a stack of released slots inside that range.
+static Timer *s_timers = NULL;
+static uint32_t s_timer_capacity = 0;
+static uint32_t s_timer_used = 0;
 static int s_timer_count = 0;
 
-// Priority queue (min-heap)
-#define QUEUE_MAX_SIZE 512
-static TimerQueueEntry s_queue[QUEUE_MAX_SIZE];
+static uint32_t *s_free_indices = NULL;
+static uint32_t s_free_capacity = 0;
+static uint32_t s_free_count = 0;
+
+// Priority queue (min-heap), grown on demand
+static TimerQueueEntry *s_queue = NULL;
+static int s_queue_capacity = 0;
 static int s_queue_size = 0;
+
+// Ephemeral handle layout: bits 0..30 = slot index + 1 (0 is "no timer",
+// bit 31 is the persistent-timer flag used by timer_create_persistent),
+// bits 32..52 = slot salt. Staying below 2^53 keeps the handle exact if a mod
+// round-trips it through Ext.Json (doubles).
+#define TIMER_HANDLE_INDEX_MASK  0x7FFFFFFFu
+#define TIMER_HANDLE_SALT_MASK   0x1FFFFFu
+#define TIMER_HANDLE_PERSISTENT  0x80000000u
+
+static inline TimerHandle timer_make_handle(uint32_t idx, uint32_t salt) {
+    return ((TimerHandle)(salt & TIMER_HANDLE_SALT_MASK) << 32) | (TimerHandle)(idx + 1);
+}
 
 // Time conversion
 static mach_timebase_info_data_t s_timebase_info;
@@ -149,9 +180,15 @@ static void queue_sift_down(int idx) {
 }
 
 static bool queue_push(double fire_time, TimerHandle handle, uint32_t invoke_id) {
-    if (s_queue_size >= QUEUE_MAX_SIZE) {
-        LOG_TIMER_WARN("Queue full, cannot schedule timer");
-        return false;
+    if (s_queue_size >= s_queue_capacity) {
+        int new_capacity = s_queue_capacity ? s_queue_capacity * 2 : 512;
+        TimerQueueEntry *grown = realloc(s_queue, (size_t)new_capacity * sizeof(*grown));
+        if (!grown) {
+            LOG_TIMER_ERROR("Out of memory growing timer queue to %d entries", new_capacity);
+            return false;
+        }
+        s_queue = grown;
+        s_queue_capacity = new_capacity;
     }
 
     s_queue[s_queue_size].fire_time = fire_time;
@@ -184,21 +221,63 @@ static TimerQueueEntry queue_top(void) {
 // Timer Pool
 // ============================================================================
 
-static int timer_pool_alloc(void) {
-    for (int i = 0; i < TIMER_MAX_COUNT; i++) {
-        if (!s_timers[i].active) {
-            return i;
-        }
+// Returns a slot index, or -1 if memory could not be grown. Released slots
+// are recycled first (their salt was bumped at release, so the new handle
+// differs from every handle that slot ever answered to).
+static int64_t timer_pool_alloc(void) {
+    if (s_free_count > 0) {
+        return s_free_indices[--s_free_count];
     }
-    return -1;  // Pool full
+
+    if (s_timer_used >= s_timer_capacity) {
+        if (s_timer_used >= TIMER_HANDLE_INDEX_MASK - 1) {
+            return -1;
+        }
+        uint32_t new_capacity = s_timer_capacity ? s_timer_capacity * 2 : TIMER_INITIAL_CAPACITY;
+        Timer *grown = realloc(s_timers, (size_t)new_capacity * sizeof(*grown));
+        if (!grown) {
+            LOG_TIMER_ERROR("Out of memory growing timer pool to %u slots", new_capacity);
+            return -1;
+        }
+        // Pristine slots: inactive, no ref, salt 0
+        memset(grown + s_timer_capacity, 0,
+               (size_t)(new_capacity - s_timer_capacity) * sizeof(*grown));
+        for (uint32_t i = s_timer_capacity; i < new_capacity; i++) {
+            grown[i].callback_ref = LUA_NOREF;
+        }
+        s_timers = grown;
+        s_timer_capacity = new_capacity;
+    }
+
+    return s_timer_used++;
+}
+
+static void timer_pool_release(uint32_t idx) {
+    Timer *timer = &s_timers[idx];
+    timer->active = false;
+    timer->salt = (timer->salt + 1) & TIMER_HANDLE_SALT_MASK;
+
+    if (s_free_count >= s_free_capacity) {
+        uint32_t new_capacity = s_free_capacity ? s_free_capacity * 2 : TIMER_INITIAL_CAPACITY;
+        uint32_t *grown = realloc(s_free_indices, (size_t)new_capacity * sizeof(*grown));
+        if (!grown) {
+            // The slot stays unreachable until the next timer_clear_all; a
+            // leaked slot beats a corrupted free list.
+            LOG_TIMER_WARN("Out of memory growing timer free list; leaking slot %u", idx);
+            return;
+        }
+        s_free_indices = grown;
+        s_free_capacity = new_capacity;
+    }
+    s_free_indices[s_free_count++] = idx;
 }
 
 static Timer *timer_get(TimerHandle handle) {
-    // Handles are 1-based (0 = invalid), convert to 0-based index
-    if (handle == 0) return NULL;
-    uint32_t idx = (uint32_t)((handle - 1) & 0xFFFFFFFF);
-    if (idx >= TIMER_MAX_COUNT) return NULL;
-    if (!s_timers[idx].active) return NULL;
+    if (handle == 0 || (handle & TIMER_HANDLE_PERSISTENT)) return NULL;
+    uint32_t idx = (uint32_t)(handle & TIMER_HANDLE_INDEX_MASK) - 1;
+    uint32_t salt = (uint32_t)(handle >> 32) & TIMER_HANDLE_SALT_MASK;
+    if (idx >= s_timer_used) return NULL;
+    if (!s_timers[idx].active || s_timers[idx].salt != salt) return NULL;
     return &s_timers[idx];
 }
 
@@ -209,15 +288,8 @@ static Timer *timer_get(TimerHandle handle) {
 void timer_init(void) {
     init_timebase();
 
-    // Clear timer pool
-    memset(s_timers, 0, sizeof(s_timers));
-    for (int i = 0; i < TIMER_MAX_COUNT; i++) {
-        s_timers[i].callback_ref = LUA_NOREF;
-    }
-    s_timer_count = 0;
-
-    // Clear queue
-    s_queue_size = 0;
+    // Nothing has a Lua ref yet at init; drop every slot without touching L.
+    timer_clear_all(NULL);
 
     LOG_TIMER_INFO("Timer system initialized");
 }
@@ -228,12 +300,13 @@ void timer_shutdown(lua_State *L) {
 }
 
 TimerHandle timer_create(lua_State *L, double delay_ms, int callback_ref, double repeat_ms) {
-    int idx = timer_pool_alloc();
-    if (idx < 0) {
-        LOG_TIMER_ERROR("Timer pool exhausted (%d max)", TIMER_MAX_COUNT);
+    int64_t slot = timer_pool_alloc();
+    if (slot < 0) {
+        LOG_TIMER_ERROR("Timer pool exhausted (%u slots in use)", s_timer_used);
         luaL_unref(L, LUA_REGISTRYINDEX, callback_ref);
         return 0;
     }
+    uint32_t idx = (uint32_t)slot;
 
     double now = timer_get_monotonic_ms();
 
@@ -246,37 +319,38 @@ TimerHandle timer_create(lua_State *L, double delay_ms, int callback_ref, double
     timer->active = true;
     s_timer_count++;
 
-    // Handles are 1-based (0 = invalid/error)
-    TimerHandle handle = (TimerHandle)(idx + 1);
+    TimerHandle handle = timer_make_handle(idx, timer->salt);
 
     if (!queue_push(timer->fire_time, handle, timer->invoke_id)) {
-        // Queue full, cancel the timer
-        timer->active = false;
         luaL_unref(L, LUA_REGISTRYINDEX, callback_ref);
         timer->callback_ref = LUA_NOREF;
         s_timer_count--;
+        timer_pool_release(idx);
         return 0;
     }
 
     return handle;
 }
 
+// Drops the slot's Lua ref and returns it to the free list. Any heap entry
+// still naming the old handle is ignored when popped: the salt no longer
+// matches, so it cannot reach whatever timer reuses the slot.
+static void timer_release(lua_State *L, Timer *timer) {
+    if (timer->callback_ref != LUA_NOREF) {
+        if (L) {
+            luaL_unref(L, LUA_REGISTRYINDEX, timer->callback_ref);
+        }
+        timer->callback_ref = LUA_NOREF;
+    }
+    s_timer_count--;
+    timer_pool_release((uint32_t)(timer - s_timers));
+}
+
 bool timer_cancel(lua_State *L, TimerHandle handle) {
     Timer *timer = timer_get(handle);
     if (!timer) return false;
 
-    // Release Lua callback reference
-    if (timer->callback_ref != LUA_NOREF) {
-        luaL_unref(L, LUA_REGISTRYINDEX, timer->callback_ref);
-        timer->callback_ref = LUA_NOREF;
-    }
-
-    timer->active = false;
-    s_timer_count--;
-
-    // Note: We don't remove from queue - the entry will be ignored when popped
-    // because active=false
-
+    timer_release(L, timer);
     return true;
 }
 
@@ -339,7 +413,15 @@ void timer_update(lua_State *L) {
         double repeat_interval = timer->repeat_interval;
         int callback_ref = timer->callback_ref;
 
-        // Fire callback
+        // Fire callback inside a lifetime scope. Without one, every component
+        // proxy the callback touches is born already expired ("Lifetime of
+        // Component has expired; re-fetch the object in the current scope"), so
+        // a mod doing entity work from Ext.Timer silently fails -- while the
+        // same code works from an event handler or the console, which do open a
+        // scope. Every other Lua entry point in the port scopes; this one did
+        // not.
+        LifetimeHandle scope = lifetime_lua_begin_scope(L);
+
         lua_rawgeti(L, LUA_REGISTRYINDEX, callback_ref);
         lua_pushinteger(L, (lua_Integer)entry.handle);
 
@@ -349,45 +431,46 @@ void timer_update(lua_State *L) {
             lua_pop(L, 1);
         }
 
+        lifetime_lua_end_scope(L);
+        (void)scope;
+
         // Re-fetch timer (callback may have cancelled it or modified state)
         timer = timer_get(entry.handle);
 
-        // Repeat or release
-        if (timer && timer->active && is_repeating) {
+        // Repeat or release. timer_get re-checks the salt, so if the callback
+        // cancelled this timer (and the slot was already reused) we see NULL
+        // and leave the new occupant alone.
+        if (timer && is_repeating) {
+            if (timer->paused) {
+                // Paused from inside its own callback; Resume re-queues it.
+                continue;
+            }
             timer->fire_time = now + repeat_interval;
             if (!queue_push(timer->fire_time, entry.handle, timer->invoke_id)) {
-                // Queue full, cancel the timer
-                LOG_TIMER_WARN("Queue full during repeat, cancelling timer");
-                if (timer->callback_ref != LUA_NOREF) {
-                    luaL_unref(L, LUA_REGISTRYINDEX, timer->callback_ref);
-                    timer->callback_ref = LUA_NOREF;
-                }
-                timer->active = false;
-                s_timer_count--;
+                LOG_TIMER_WARN("Could not re-queue repeating timer, cancelling it");
+                timer_release(L, timer);
             }
-        } else if (timer && timer->active) {
+        } else if (timer) {
             // One-shot timer completed
-            if (timer->callback_ref != LUA_NOREF) {
-                luaL_unref(L, LUA_REGISTRYINDEX, timer->callback_ref);
-                timer->callback_ref = LUA_NOREF;
-            }
-            timer->active = false;
-            s_timer_count--;
+            timer_release(L, timer);
         }
-        // If !timer || !timer->active, callback cancelled itself - already cleaned up
     }
 }
 
 void timer_clear_all(lua_State *L) {
-    for (int i = 0; i < TIMER_MAX_COUNT; i++) {
+    for (uint32_t i = 0; i < s_timer_used; i++) {
         if (s_timers[i].active) {
             if (L && s_timers[i].callback_ref != LUA_NOREF) {
                 luaL_unref(L, LUA_REGISTRYINDEX, s_timers[i].callback_ref);
             }
             s_timers[i].callback_ref = LUA_NOREF;
             s_timers[i].active = false;
+            // Handles held across the reset must not match the slot's next tenant
+            s_timers[i].salt = (s_timers[i].salt + 1) & TIMER_HANDLE_SALT_MASK;
         }
     }
+    s_timer_used = 0;
+    s_free_count = 0;
     s_timer_count = 0;
     s_queue_size = 0;
 
@@ -763,12 +846,17 @@ void timer_update_persistent(lua_State *L) {
             lua_pushnil(L);
         }
 
+        LifetimeHandle pscope = lifetime_lua_begin_scope(L);
+
         if (lua_pcall(L, 2, 0, 0) != LUA_OK) {
             const char *err = lua_tostring(L, -1);
             LOG_TIMER_ERROR("Persistent callback error (%s): %s",
                            timer->handler_name, err ? err : "(unknown)");
             lua_pop(L, 1);
         }
+
+        lifetime_lua_end_scope(L);
+        (void)pscope;
 
         // Re-fetch timer (callback may have modified it)
         timer = persistent_timer_get(entry.handle);

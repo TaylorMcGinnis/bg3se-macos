@@ -342,6 +342,35 @@ static const ComponentLayoutDef g_TagComponent_Layout = {
 };
 
 // ============================================================================
+// Server tag-source components (esv::tags::*TagComponent)
+// From: BG3Extender/GameDefinitions/Components/ServerData.h:76-110
+// Each is a bare Array<Guid> Tags, same shape as eoc::TagComponent (0x10).
+// The engine's per-slot stride (EntityStorageData::ComponentSizes) is the
+// addressing authority and warns if this size is ever wrong.
+// BG3SX reads entity:GetAllComponents().ServerRaceTag.Tags to pick an NPC's
+// body from its race tags.
+// ============================================================================
+
+#define BG3SE_SERVER_TAG_LAYOUT(ident, cls, upstreamName)                                        \
+    static const ComponentLayoutDef g_esv_##ident##_Layout = {                                   \
+        .componentName = cls,                                                                    \
+        .shortName = upstreamName,                                                               \
+        .componentTypeIndex = 0,                                                                 \
+        .componentSize = 0x10,                                                                   \
+        .properties = g_TagComponent_Properties,                                                 \
+        .propertyCount = sizeof(g_TagComponent_Properties) / sizeof(g_TagComponent_Properties[0]), \
+    };
+
+BG3SE_SERVER_TAG_LAYOUT(AnubisTagComponent,   "esv::tags::AnubisTagComponent",   "ServerAnubisTag")
+BG3SE_SERVER_TAG_LAYOUT(BoostTagComponent,    "esv::tags::BoostTagComponent",    "ServerBoostTag")
+BG3SE_SERVER_TAG_LAYOUT(DialogTagComponent,   "esv::tags::DialogTagComponent",   "ServerDialogTag")
+BG3SE_SERVER_TAG_LAYOUT(OsirisTagComponent,   "esv::tags::OsirisTagComponent",   "ServerOsirisTag")
+BG3SE_SERVER_TAG_LAYOUT(RaceTagComponent,     "esv::tags::RaceTagComponent",     "ServerRaceTag")
+BG3SE_SERVER_TAG_LAYOUT(TemplateTagComponent, "esv::tags::TemplateTagComponent", "ServerTemplateTag")
+
+#undef BG3SE_SERVER_TAG_LAYOUT
+
+// ============================================================================
 // RaceComponent (eoc::RaceComponent)
 // From: BG3Extender/GameDefinitions/Components/Data.h:492-497
 // ARM64 Verified: Size 0x10 (via Ghidra AddComponent<eoc::RaceComponent>)
@@ -559,16 +588,89 @@ static const ComponentLayoutDef g_WeaponComponent_Layout = {
 };
 
 // ============================================================================
+// SpellId / SpellData (upstream GameDefinitions/Base/ExposedTypes.h:24-46 and
+// Components/Spell.h:198-215). Nested structs reached through
+// SpellBook.Spells[i]; never registered as components.
+//
+// Verified live on ARM64 2026-09-06 (host character's spell book): stride
+// 0x68, Id.OriginatorPrototype@0x00 / Id.SourceType@0x08 / Id.Source@0x10 /
+// Id.ProgressionSource@0x20 / Id.Prototype@0x30 all read the same prototype
+// names Osiris HasSpell agrees with, PreferredCastingResource@0x38 the
+// SpellSlot/ActionPoint resource GUIDs, and CastRequirements@0x58 a
+// well-formed Array header. The previous guess (stride 88, opaque elements)
+// made every element past the first garbage and left bookspell.Id nil, which
+// killed CustomCompanions' per-henchman init loop (AT78_CC_Main.lua:899).
+// ============================================================================
+
+static const ComponentPropertyDef g_SpellId_Properties[] = {
+    { "OriginatorPrototype", 0x00, FIELD_TYPE_FIXEDSTRING, 0, false },
+    { "SourceType",          0x08, FIELD_TYPE_UINT8,       0, false, .enumDef = &g_enum_SpellSourceType },
+    { "Source",              0x10, FIELD_TYPE_GUID,        0, false },
+    { "ProgressionSource",   0x20, FIELD_TYPE_GUID,        0, false },
+    { "Prototype",           0x30, FIELD_TYPE_FIXEDSTRING, 0, false },
+};
+
+static const ComponentLayoutDef g_SpellId_Layout = {
+    .componentName = "SpellId",
+    .shortName = "SpellId",
+    .componentTypeIndex = 0,
+    .componentSize = 0x38,
+    .properties = g_SpellId_Properties,
+    .propertyCount = sizeof(g_SpellId_Properties) / sizeof(g_SpellId_Properties[0]),
+};
+
+// CastRequirements { uint8 CastContext; CastRequirementFlags Requirements; }
+// — 8 bytes per the upstream header (uint8 + pad + uint32 bitmask); element
+// contents not yet checked live, so read-only.
+static const ComponentPropertyDef g_CastRequirements_Properties[] = {
+    { "CastContext",  0x00, FIELD_TYPE_UINT8,  0, true },
+    { "Requirements", 0x04, FIELD_TYPE_UINT32, 0, true },
+};
+
+static const ComponentLayoutDef g_CastRequirements_Layout = {
+    .componentName = "spell::CastRequirements",
+    .shortName = "CastRequirements",
+    .componentTypeIndex = 0,
+    .componentSize = 0x08,
+    .properties = g_CastRequirements_Properties,
+    .propertyCount = sizeof(g_CastRequirements_Properties) / sizeof(g_CastRequirements_Properties[0]),
+};
+
+static const ComponentPropertyDef g_SpellData_Properties[] = {
+    { "Id",                       0x00, FIELD_TYPE_STRUCT, 0, true, .structLayout = &g_SpellId_Layout },
+    { "PreferredCastingResource", 0x38, FIELD_TYPE_GUID,   0, false },
+    { "SpellUUID",                0x38, FIELD_TYPE_GUID,   0, false },  // upstream legacy alias
+    { "UsedCharges",              0x48, FIELD_TYPE_INT32,  0, false },
+    { "NumCharges",               0x4c, FIELD_TYPE_INT32,  0, false },
+    { "CooldownType",             0x50, FIELD_TYPE_UINT8,  0, false, .enumDef = &g_enum_SpellCooldownType },
+    { "Charged",                  0x51, FIELD_TYPE_BOOL,   0, false },
+    { "PrepareType",              0x52, FIELD_TYPE_UINT8,  0, false, .enumDef = &g_enum_SpellPrepareType },
+    { "SpellCastingAbility",      0x53, FIELD_TYPE_UINT8,  0, false, .enumDef = &g_enum_AbilityId },
+    { "CastRequirements",         0x58, FIELD_TYPE_DYNAMIC_ARRAY, 0, true, ELEM_TYPE_STRUCT, 8,
+      .structLayout = &g_CastRequirements_Layout },
+};
+
+static const ComponentLayoutDef g_SpellData_Layout = {
+    .componentName = "spell::SpellData",
+    .shortName = "SpellData",
+    .componentTypeIndex = 0,
+    .componentSize = 0x68,
+    .properties = g_SpellData_Properties,
+    .propertyCount = sizeof(g_SpellData_Properties) / sizeof(g_SpellData_Properties[0]),
+};
+
+// ============================================================================
 // SpellBookComponent (eoc::spell::BookComponent)
 // From: BG3Extender/GameDefinitions/Components/Spell.h:217-223
 // Array<SpellData> layout: buf_(0x00), capacity_(0x08), size_(0x0C)
-// SpellData estimated size: ~88 bytes (contains SpellId, Guid, etc.)
 // ============================================================================
 
 static const ComponentPropertyDef g_SpellBookComponent_Properties[] = {
     { "Entity",     0x00, FIELD_TYPE_ENTITY_HANDLE, 0, false, ELEM_TYPE_UNKNOWN, 0 },
-    // Array<SpellData> Spells at 0x08 - dynamic array with iteration support
-    { "Spells",     0x08, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_SPELL_DATA, 88 },
+    // Array<SpellData> Spells at 0x08; each element proxied in place, so
+    // bookspell.Id.SourceType / bookspell.Id.OriginatorPrototype read as upstream.
+    { "Spells",     0x08, FIELD_TYPE_DYNAMIC_ARRAY, 0, true, ELEM_TYPE_STRUCT, 0x68,
+      .structLayout = &g_SpellData_Layout },
     // Also expose count for convenience
     { "SpellCount", 0x14, FIELD_TYPE_UINT32, 0, true, ELEM_TYPE_UNKNOWN, 0 },  // Array.size_ at 0x08+0x0C
 };
@@ -585,20 +687,29 @@ static const ComponentLayoutDef g_SpellBookComponent_Layout = {
 // ============================================================================
 // StatusContainerComponent (eoc::status::ContainerComponent)
 // From: BG3Extender/GameDefinitions/Components/Status.h:5-10
-// Note: Contains HashMap<EntityHandle, FixedString>, exposed as count
+//   HashMap<EntityHandle, FixedString> Statuses;   (0x40 bytes, the whole component)
+//
+// Verified live on ARM64 2026-09-06 (host character, 61 statuses): Keys
+// Array@0x20 (buf@0x20, size@0x2c) holds status entity handles whose
+// StatusID.ID component equals the FixedString at the same index of Values
+// @0x30 (61/61), and Osi.HasActiveStatus agrees for every value. Reads as
+// { [statusEntity] = "STATUS_ID" }, so
+//   for _, statusId in pairs(entity.StatusContainer.Statuses) do
+// works as on Windows (CustomCompanions AT78_CC_Main.lua:846/871).
 // ============================================================================
 
 static const ComponentPropertyDef g_StatusContainerComponent_Properties[] = {
-    // HashMap<EntityHandle, FixedString> Statuses at 0x00
-    // HashMap layout: HashSet (0x40) contains count at offset ~0x18
-    { "StatusCount", 0x18, FIELD_TYPE_UINT32, 0, true },  // HashMap element count
+    { "Statuses",    0x00, FIELD_TYPE_HASH_MAP, 0, true, ELEM_TYPE_ENTITY_HANDLE, 8,
+      .valueType = ELEM_TYPE_FIXED_STRING, .valueSize = 4 },
+    // Convenience: Keys.size_ (was read at 0x18, the NextIds capacity).
+    { "StatusCount", HASHMAP_KEYS_SIZE_OFFSET, FIELD_TYPE_UINT32, 0, true },
 };
 
 static const ComponentLayoutDef g_StatusContainerComponent_Layout = {
     .componentName = "eoc::status::ContainerComponent",
     .shortName = "StatusContainer",
     .componentTypeIndex = 0,
-    .componentSize = 0x48,  // HashMap size estimate
+    .componentSize = HASHMAP_SIZE,
     .properties = g_StatusContainerComponent_Properties,
     .propertyCount = sizeof(g_StatusContainerComponent_Properties) / sizeof(g_StatusContainerComponent_Properties[0]),
 };
@@ -606,12 +717,35 @@ static const ComponentLayoutDef g_StatusContainerComponent_Layout = {
 // ============================================================================
 // InventoryContainerComponent (eoc::inventory::ContainerComponent)
 // From: BG3Extender/GameDefinitions/Components/Inventory.h:34-39
-// Note: Contains HashMap<uint16_t, ContainerSlotData>, exposed as count
+//   struct ContainerSlotData { EntityHandle Item; uint32_t field_8; };
+//   HashMap<uint16_t, ContainerSlotData> Items;   (0x40 bytes, whole component)
+// Items reads as { [slot] = { Item = <entity>, field_8 = n } } in Keys order,
+// so the Windows idiom
+//   for _, slot in pairs(inv.InventoryOwner.PrimaryInventory.InventoryContainer.Items) do
+//     slot.Item ...
+// (ManyMoreMonsters Wildlands.lua:1647, EasyCheat FocusCore Inventory.lua:17)
+// works; this port only exposed the count.
 // ============================================================================
+
+static const ComponentPropertyDef g_ContainerSlotData_Properties[] = {
+    { "Item",    0x00, FIELD_TYPE_ENTITY_HANDLE, 0, true },
+    { "field_8", 0x08, FIELD_TYPE_UINT32,        0, true },
+};
+
+static const ComponentLayoutDef g_ContainerSlotData_Layout = {
+    .componentName = "eoc::inventory::ContainerSlotData",
+    .shortName = "ContainerSlotData",
+    .componentTypeIndex = 0,
+    .componentSize = 0x10,
+    .properties = g_ContainerSlotData_Properties,
+    .propertyCount = sizeof(g_ContainerSlotData_Properties) / sizeof(g_ContainerSlotData_Properties[0]),
+};
 
 static const ComponentPropertyDef g_InventoryContainerComponent_Properties[] = {
     // HashMap<uint16_t, ContainerSlotData> Items at 0x00
-    { "ItemCount", 0x18, FIELD_TYPE_UINT32, 0, true },  // HashMap element count
+    { "Items",     0x00, FIELD_TYPE_HASH_MAP, 0, true, ELEM_TYPE_UINT16, 2,
+      .structLayout = &g_ContainerSlotData_Layout, .valueType = ELEM_TYPE_STRUCT, .valueSize = 0x10 },
+    { "ItemCount", HASHMAP_KEYS_SIZE_OFFSET, FIELD_TYPE_UINT32, 0, true },  // HashMap Keys.size_ (0x18 was NextIds capacity)
 };
 
 static const ComponentLayoutDef g_InventoryContainerComponent_Layout = {
@@ -632,7 +766,7 @@ static const ComponentLayoutDef g_InventoryContainerComponent_Layout = {
 
 static const ComponentPropertyDef g_ActionResourcesComponent_Properties[] = {
     // HashMap<Guid, Array<ActionResourceEntry>> Resources at 0x00
-    { "ResourceTypeCount", 0x18, FIELD_TYPE_UINT32, 0, true },  // HashMap element count
+    { "ResourceTypeCount", HASHMAP_KEYS_SIZE_OFFSET, FIELD_TYPE_UINT32, 0, true },  // HashMap Keys.size_ (0x18 was NextIds capacity)
 };
 
 static const ComponentLayoutDef g_ActionResourcesComponent_Layout = {
@@ -650,17 +784,23 @@ static const ComponentLayoutDef g_ActionResourcesComponent_Layout = {
 // On characters - links to their inventory entity
 // ============================================================================
 
+// Upstream Components/Inventory.h OwnerComponent { Array<EntityHandle>
+// Inventories; EntityHandle PrimaryInventory; }. Array<T> is buf/cap/size =
+// 16 bytes, so PrimaryInventory sits at 0x10 (verified live 2026-09-06: the
+// old 0x18 read past the component and produced a dead 0x8300a500000000
+// handle; 0x10 resolves to the inventory whose InventoryIsOwned.Owner is the
+// character).
 static const ComponentPropertyDef g_InventoryOwnerComponent_Properties[] = {
-    // Array<EntityHandle> Inventories at 0x00 (ptr + size + capacity = 24 bytes)
-    { "InventoryCount",    0x08, FIELD_TYPE_UINT32,        0, true },  // Array size
-    { "PrimaryInventory",  0x18, FIELD_TYPE_ENTITY_HANDLE, 0, false },  // EntityHandle
+    { "Inventories",       0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, true, ELEM_TYPE_ENTITY_HANDLE, 8 },
+    { "InventoryCount",    0x0c, FIELD_TYPE_UINT32,        0, true },  // Array size
+    { "PrimaryInventory",  0x10, FIELD_TYPE_ENTITY_HANDLE, 0, false },
 };
 
 static const ComponentLayoutDef g_InventoryOwnerComponent_Layout = {
     .componentName = "eoc::inventory::OwnerComponent",
     .shortName = "InventoryOwner",
     .componentTypeIndex = 0,
-    .componentSize = 0x20,
+    .componentSize = 0x18,
     .properties = g_InventoryOwnerComponent_Properties,
     .propertyCount = sizeof(g_InventoryOwnerComponent_Properties) / sizeof(g_InventoryOwnerComponent_Properties[0]),
 };
@@ -4659,18 +4799,8 @@ static const ComponentLayoutDef g_esv_CampRegionTrigger_Layout = {
     .propertyCount = sizeof(g_esv_CampRegionTrigger_Properties) / sizeof(g_esv_CampRegionTrigger_Properties[0]),
 };
 
-// esv::Character - 8 bytes (0x08)
-static const ComponentPropertyDef g_esv_Character_Properties[] = {
-    { "CharacterPtr", 0x00, FIELD_TYPE_UINT64, 0, false },  // Ptr to 0x1a8 (424b) malloc
-};
-static const ComponentLayoutDef g_esv_Character_Layout = {
-    .componentName = "esv::Character",
-    .shortName = "Character",
-    .componentTypeIndex = 0,
-    .componentSize = 0x08,
-    .properties = g_esv_Character_Properties,
-    .propertyCount = sizeof(g_esv_Character_Properties) / sizeof(g_esv_Character_Properties[0]),
-};
+// esv::Character (ServerCharacter) is a proxy component; its layout sits with
+// esv::Item below, after the esv::StatusMachine pointee layout it refers to.
 
 // esv::CharacterComponent - 24 bytes (0x18)
 static const ComponentPropertyDef g_esv_CharacterComponent_Properties[] = {
@@ -5148,6 +5278,89 @@ static const ComponentLayoutDef g_esv_StatusMachine_Layout = {
     .componentSize = 0,
     .properties = g_esv_StatusMachine_Properties,
     .propertyCount = sizeof(g_esv_StatusMachine_Properties) / sizeof(g_esv_StatusMachine_Properties[0]),
+};
+
+// esv::PlayerData - nested struct reached through esv::Character::PlayerData
+// (NULL on non-player characters); upstream GameDefinitions/Character.h.
+// Verified live on ARM64: PlayerHandle@0 is the owning entity, HelmetOption@0x84
+// read 2, Region@0x90 a level FixedString. CustomData (an embedded struct) and
+// PreviousPositions (Array<vec3>) are not modelled.
+static const ComponentPropertyDef g_esv_PlayerData_Properties[] = {
+    { "PlayerHandle", 0x00, FIELD_TYPE_ENTITY_HANDLE, 0, true },
+    { "QuestSelected", 0x48, FIELD_TYPE_FIXEDSTRING, 0, true },
+    { "PreviousPositionId", 0x80, FIELD_TYPE_INT32, 0, true },
+    { "HelmetOption", 0x84, FIELD_TYPE_UINT8, 0, true },
+    { "Renown", 0x88, FIELD_TYPE_INT32, 0, true },
+    { "CachedTension", 0x8c, FIELD_TYPE_UINT8, 0, true },
+    { "IsInDangerZone", 0x8d, FIELD_TYPE_BOOL, 0, true },
+    { "Region", 0x90, FIELD_TYPE_FIXEDSTRING, 0, true },
+};
+static const ComponentLayoutDef g_esv_PlayerData_Layout = {
+    .componentName = "esv::PlayerData",
+    .shortName = "EsvPlayerData",
+    .componentTypeIndex = 0,
+    .componentSize = 0,
+    .properties = g_esv_PlayerData_Properties,
+    .propertyCount = sizeof(g_esv_PlayerData_Properties) / sizeof(g_esv_PlayerData_Properties[0]),
+};
+
+// esv::Character - proxy component: the ECS slot holds an esv::Character* and
+// the object itself is 0x1a8 bytes (upstream GameDefinitions/Character.h; the
+// ARM64 build lays it out identically). Verified live against the host
+// character: MyHandle@0x20 is the entity handle, +0x28 the server EntityWorld,
+// Level@0x30 matches Osi.GetRegion, Template@0xc8 -> Id equals
+// GameObjectVisual.RootTemplateId, StatusManager@0x130 owns the same handle,
+// UserID@0x184 equals Osi.GetReservedUserID. Exposed as ServerCharacter for
+// Windows parity (CustomCompanions builds its henchman keys from
+// ServerCharacter.Template.Name .. "_" .. Uuid.EntityUuid).
+static const ComponentPropertyDef g_esv_Character_Properties[] = {
+    { "Flags", 0x18, FIELD_TYPE_UINT64, 0, true },
+    { "MyHandle", 0x20, FIELD_TYPE_ENTITY_HANDLE, 0, true },
+    { "Level", 0x30, FIELD_TYPE_FIXEDSTRING, 0, true },
+    { "VisualResource", 0x34, FIELD_TYPE_FIXEDSTRING, 0, true },
+    { "Summons", 0x68, FIELD_TYPE_DYNAMIC_ARRAY, 0, true, ELEM_TYPE_ENTITY_HANDLE, 8 },
+    { "CreatedTemplateItems", 0x78, FIELD_TYPE_DYNAMIC_ARRAY, 0, true, ELEM_TYPE_FIXED_STRING, 4 },
+    { "Treasures", 0x88, FIELD_TYPE_DYNAMIC_ARRAY, 0, true, ELEM_TYPE_FIXED_STRING, 4 },
+    { "DisabledCrime", 0x98, FIELD_TYPE_DYNAMIC_ARRAY, 0, true, ELEM_TYPE_FIXED_STRING, 4 },
+    { "PreferredAiTargets", 0xa8, FIELD_TYPE_DYNAMIC_ARRAY, 0, true, ELEM_TYPE_GUID, 16 },
+    { "ServerControl", 0xb8, FIELD_TYPE_DYNAMIC_ARRAY, 0, true, ELEM_TYPE_FIXED_STRING, 4 },
+    { "Template", 0xc8, FIELD_TYPE_TEMPLATE_PTR, 0, true },
+    { "OriginalTemplate", 0xd0, FIELD_TYPE_TEMPLATE_PTR, 0, true },
+    { "TemplateUsedForSpells", 0xd8, FIELD_TYPE_TEMPLATE_PTR, 0, true },
+    { "StatusManager", 0x130, FIELD_TYPE_STRUCT_PTR, 0, true,
+      .structLayout = &g_esv_StatusMachine_Layout },
+    { "PlayerData", 0x150, FIELD_TYPE_STRUCT_PTR, 0, true,
+      .structLayout = &g_esv_PlayerData_Layout },
+    { "Inventory", 0x158, FIELD_TYPE_ENTITY_HANDLE, 0, true },
+    { "OwnerCharacter", 0x160, FIELD_TYPE_ENTITY_HANDLE, 0, true },
+    { "FollowCharacter", 0x168, FIELD_TYPE_ENTITY_HANDLE, 0, true },
+    { "EnemyCharacter", 0x170, FIELD_TYPE_ENTITY_HANDLE, 0, true },
+    { "Dialog", 0x178, FIELD_TYPE_INT32, 0, true },
+    { "CustomTradeTreasure", 0x17c, FIELD_TYPE_FIXEDSTRING, 0, true },
+    { "BaseVisual", 0x180, FIELD_TYPE_FIXEDSTRING, 0, true },
+    { "UserID", 0x184, FIELD_TYPE_INT32, 0, true },
+    { "UserID2", 0x188, FIELD_TYPE_INT32, 0, true },
+    { "GeneralSpeedMultiplier", 0x18c, FIELD_TYPE_FLOAT, 0, true },
+    { "CrimeHandle", 0x190, FIELD_TYPE_INT32, 0, true },
+    { "PreviousCrimeHandle", 0x194, FIELD_TYPE_INT32, 0, true },
+    { "InvestigationTimer", 0x198, FIELD_TYPE_FLOAT, 0, true },
+    { "CrimeState", 0x19c, FIELD_TYPE_UINT8, 0, true },
+    { "PreviousCrimeState", 0x19d, FIELD_TYPE_UINT8, 0, true },
+    { "BlockNewDisturbanceReactions", 0x19e, FIELD_TYPE_BOOL, 0, true },
+    { "HasOsirisDialog", 0x1a0, FIELD_TYPE_BOOL, 0, true },
+    { "NeedsUpdate", 0x1a1, FIELD_TYPE_BOOL, 0, true },
+    { "ForceSynch", 0x1a2, FIELD_TYPE_BOOL, 0, true },
+    { "NumConsumables", 0x1a3, FIELD_TYPE_UINT8, 0, true },
+    { "Flags2", 0x1a4, FIELD_TYPE_UINT8, 0, true },
+    { "Flags3", 0x1a5, FIELD_TYPE_UINT8, 0, true },
+};
+static const ComponentLayoutDef g_esv_Character_Layout = {
+    .componentName = "esv::Character",
+    .shortName = "ServerCharacter",
+    .componentTypeIndex = 0,
+    .componentSize = 0x1a8,
+    .properties = g_esv_Character_Properties,
+    .propertyCount = sizeof(g_esv_Character_Properties) / sizeof(g_esv_Character_Properties[0]),
 };
 
 // esv::Item - proxy component: the ECS slot holds an esv::Item* and the
@@ -7896,7 +8109,90 @@ static const ComponentLayoutDef g_ls_UuidToHandleMapping_Layout = {
     .propertyCount = sizeof(g_ls_UuidToHandleMapping_Properties) / sizeof(g_ls_UuidToHandleMapping_Properties[0]),
 };
 
+/* ---------------------------------------------------------------------------
+ * character_creation::Appearance and its AppearanceOverride wrapper.
+ *
+ * Offsets MEASURED LIVE on build 4.1.1.7398727 (2026-09-09), not taken from the
+ * Windows headers: upstream lists Icon and the colour GUIDs first with the three
+ * arrays last, which is NOT this build's order. The generated table had the four
+ * GUIDs at 0x00/0x10/0x20/0x30 -- exactly where the Array headers live -- so
+ * `EyeColor` read back as b386ca80-0009-0000-0009-000000090000: a buffer pointer
+ * followed by size=9 and capacity=9. Every mod reading appearance colours on
+ * macOS was getting array headers formatted as GUIDs.
+ *
+ * Verified against Gale: +0x00 Array size 3 of 16-byte GUIDs; +0x10 Array size 9
+ * of Guid,Guid,float,float,float (stride 0x30); +0x20 Array size 4 of floats;
+ * then four GUIDs with +0x40 == +0x50 (EyeColor and SecondEyeColor matching, as
+ * expected for a character with matching eyes). Ends at 0x70, the size the
+ * generated table already declared.
+ *
+ * These live here rather than in generated_property_defs.h because that table
+ * registers as generated/unverified, which makes every field read-only --
+ * AppearanceEditEnhanced needs to write them.
+ * ------------------------------------------------------------------------- */
+static const ComponentPropertyDef g_AppearanceMaterialSetting_Properties[] = {
+    { "Material",       0x00, FIELD_TYPE_GUID,  0, false },
+    { "Color",          0x10, FIELD_TYPE_GUID,  0, false },
+    { "ColorIntensity", 0x20, FIELD_TYPE_FLOAT, 0, false },
+    { "MetallicTint",   0x24, FIELD_TYPE_FLOAT, 0, false },
+    { "GlossyTint",     0x28, FIELD_TYPE_FLOAT, 0, false },
+};
+
+static const ComponentLayoutDef g_AppearanceMaterialSetting_Layout = {
+    .componentName = "eoc::character_creation::AppearanceMaterialSetting",
+    .shortName = "AppearanceMaterialSetting",
+    .componentTypeIndex = 0,
+    .componentSize = 0x30,
+    .properties = g_AppearanceMaterialSetting_Properties,
+    .propertyCount = sizeof(g_AppearanceMaterialSetting_Properties) / sizeof(g_AppearanceMaterialSetting_Properties[0]),
+};
+
+static const ComponentPropertyDef g_CharacterCreationAppearance_Properties[] = {
+    { "Visuals",           0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_GUID, 16 },
+    { "Elements",          0x10, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_STRUCT, 0x30,
+      .structLayout = &g_AppearanceMaterialSetting_Layout },
+    /* Array<float>; there is no ELEM_TYPE_FLOAT, and raw 4-byte elements are
+     * enough for the count-and-copy use mods make of it. */
+    { "AdditionalChoices", 0x20, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_UNKNOWN, 4 },
+    { "SkinColor",         0x30, FIELD_TYPE_GUID, 0, false },
+    { "EyeColor",          0x40, FIELD_TYPE_GUID, 0, false },
+    { "SecondEyeColor",    0x50, FIELD_TYPE_GUID, 0, false },
+    { "HairColor",         0x60, FIELD_TYPE_GUID, 0, false },
+};
+
+static const ComponentLayoutDef g_CharacterCreationAppearance_Layout = {
+    .componentName = "eoc::character_creation::AppearanceComponent",
+    .shortName = "Appearance",
+    .componentTypeIndex = 0,
+    .componentSize = 0x70,
+    .properties = g_CharacterCreationAppearance_Properties,
+    .propertyCount = sizeof(g_CharacterCreationAppearance_Properties) / sizeof(g_CharacterCreationAppearance_Properties[0]),
+};
+
+/* eoc::object_visual::AppearanceOverrideComponent is a single
+ * character_creation::Appearance at offset 0 (upstream
+ * GameDefinitions/Components/Visual.h:50-55). Without a layout the named
+ * accessor returned nil even though the component was present, so
+ * AppearanceEditEnhanced's `if (not Entity.AppearanceOverride)` was always true:
+ * it recreated the component and rescheduled its timer forever, never reaching
+ * the branch that copies the appearance in. */
+static const ComponentPropertyDef g_AppearanceOverrideComponent_Properties[] = {
+    { "Visual", 0x00, FIELD_TYPE_STRUCT, 0, false, ELEM_TYPE_UNKNOWN, 0,
+      .structLayout = &g_CharacterCreationAppearance_Layout },
+};
+
+static const ComponentLayoutDef g_AppearanceOverrideComponent_Layout = {
+    .componentName = "eoc::object_visual::AppearanceOverrideComponent",
+    .shortName = "AppearanceOverride",
+    .componentTypeIndex = 0,
+    .componentSize = 0x70,
+    .properties = g_AppearanceOverrideComponent_Properties,
+    .propertyCount = sizeof(g_AppearanceOverrideComponent_Properties) / sizeof(g_AppearanceOverrideComponent_Properties[0]),
+};
+
 static const ComponentLayoutDef* g_AllComponentLayouts[] = {
+    &g_CharacterCreationAppearance_Layout,
+    &g_AppearanceOverrideComponent_Layout,
     &g_HealthComponent_Layout,
     &g_BaseHpComponent_Layout,
     &g_ArmorComponent_Layout,
@@ -7913,6 +8209,12 @@ static const ComponentLayoutDef* g_AllComponentLayouts[] = {
     &g_ResistancesComponent_Layout,
     &g_PassiveContainerComponent_Layout,
     &g_TagComponent_Layout,
+    &g_esv_AnubisTagComponent_Layout,
+    &g_esv_BoostTagComponent_Layout,
+    &g_esv_DialogTagComponent_Layout,
+    &g_esv_OsirisTagComponent_Layout,
+    &g_esv_RaceTagComponent_Layout,
+    &g_esv_TemplateTagComponent_Layout,
     &g_RaceComponent_Layout,
     &g_OriginComponent_Layout,
     &g_ClassesComponent_Layout,

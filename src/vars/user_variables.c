@@ -354,25 +354,35 @@ void uvar_set(lua_State *L, const char *guid, uint64_t handle,
         }
 
         case LUA_TTABLE: {
-            // Serialize table to JSON
+            /* Value first, THEN buffinit -- the buffer box must stay on top of
+             * the stack for the whole append or a grow corrupts it and stores
+             * garbage. See the matching comment in mvar_set. */
             var->type = UVAR_TYPE_TABLE;
+
+            lua_pushvalue(L, value_index);
+            int value_abs = lua_gettop(L);
+
             luaL_Buffer b;
             luaL_buffinit(L, &b);
-
-            // Push value to top of stack for json_stringify_value
-            lua_pushvalue(L, value_index);
-            json_stringify_value(L, lua_gettop(L), &b);
-            lua_pop(L, 1);  // Pop the pushed value
-
+            json_stringify_value(L, value_abs, &b);
             luaL_pushresult(&b);
-            size_t json_len;
+
+            size_t json_len = 0;
             const char *json = lua_tolstring(L, -1, &json_len);
-            var->value.string = malloc(json_len + 1);
-            if (var->value.string) {
-                memcpy(var->value.string, json, json_len);
-                var->value.string[json_len] = '\0';
+            char *stored = malloc(json_len + 1);
+            if (stored && json) {
+                memcpy(stored, json, json_len);
+                stored[json_len] = '\0';
+                free(var->value.string);
+                var->value.string = stored;
+            } else {
+                free(stored);
+                LOG_LUA_ERROR("Failed to store JSON for entity variable %s (%zu bytes)",
+                              key ? key : "?", json_len);
             }
-            lua_pop(L, 1);  // Pop JSON string
+
+            lua_pop(L, 1);            /* the result string */
+            lua_remove(L, value_abs); /* the copy of the value */
             break;
         }
 
@@ -970,6 +980,10 @@ void mvar_set(lua_State *L, const char *mod_uuid, const char *key, int value_ind
         return;
     }
 
+    /* The stored JSON is about to be replaced, so any cached parse of the old
+     * value is stale. The next read re-parses and re-caches. */
+    mvar_cache_invalidate(L, mod_uuid, key);
+
     // Get or create prototype
     int proto_idx = find_mod_prototype_index(mod, key);
     if (proto_idx < 0) {
@@ -1041,24 +1055,44 @@ void mvar_set(lua_State *L, const char *mod_uuid, const char *key, int value_ind
         }
 
         case LUA_TTABLE: {
-            // Serialize table to JSON
+            /* Serialize to JSON.
+             *
+             * ORDER MATTERS: luaL_buffinit pushes the buffer box, and in Lua
+             * 5.4 that box must be on top of the stack whenever the buffer
+             * grows. Pushing the value AFTER buffinit leaves the table sitting
+             * above the box, so the first append large enough to force a
+             * resize corrupts the stack and stores garbage -- an 11-byte
+             * "P\x1a..." instead of the object. Small tables fit the inline
+             * buffer and appeared to work, which is why this only bit mods
+             * storing something sizeable (AppearanceEditEnhanced persists a
+             * 164-key character template). Same trap as the PersistentVars
+             * 4-byte-"null" bug. Push the value first, then init the buffer. */
             var->type = UVAR_TYPE_TABLE;
-            luaL_Buffer b;
-            luaL_buffinit(L, &b);
 
             lua_pushvalue(L, value_index);
-            json_stringify_value(L, lua_gettop(L), &b);
-            lua_pop(L, 1);
+            int value_abs = lua_gettop(L);
 
+            luaL_Buffer b;
+            luaL_buffinit(L, &b);
+            json_stringify_value(L, value_abs, &b);
             luaL_pushresult(&b);
-            size_t json_len;
+
+            size_t json_len = 0;
             const char *json = lua_tolstring(L, -1, &json_len);
-            var->value.string = malloc(json_len + 1);
-            if (var->value.string) {
-                memcpy(var->value.string, json, json_len);
-                var->value.string[json_len] = '\0';
+            char *stored = malloc(json_len + 1);
+            if (stored && json) {
+                memcpy(stored, json, json_len);
+                stored[json_len] = '\0';
+                free(var->value.string);   /* replacing the previous payload */
+                var->value.string = stored;
+            } else {
+                free(stored);
+                LOG_LUA_ERROR("Failed to store JSON for mod %s.%s (%zu bytes)",
+                              mod_uuid, key, json_len);
             }
-            lua_pop(L, 1);
+
+            lua_pop(L, 1);          /* the result string */
+            lua_remove(L, value_abs); /* the copy of the value */
             break;
         }
 
@@ -1073,6 +1107,82 @@ void mvar_set(lua_State *L, const char *mod_uuid, const char *key, int value_ind
     g_ModsDirty = true;
 
     LOG_LUA_DEBUG("Set mod %s.%s (type=%d)", mod_uuid, key, var->type);
+}
+
+/* Table-valued mod variables are stored as JSON. Re-parsing on every read
+ * returns a FRESH table each time, which silently breaks the read-modify-write
+ * pattern every mod uses:
+ *
+ *     ModVars.OriginalTemplates[char] = {}          -- mutates a throwaway
+ *     ModVars.OriginalTemplates = ModVars.OriginalTemplates   -- re-reads an
+ *                                                   -- empty copy, writes that
+ *     ModVars.OriginalTemplates[char][k] = v        -- indexes nil -> ERROR
+ *
+ * That is AppearanceEditEnhanced Utils.lua:779-780, and the raised error aborts
+ * its whole resculpt: the new appearance is never applied to the character AND
+ * the throwaway character creation made is never removed, leaving the player
+ * with two of the same companion. Upstream hands back a cached table per
+ * variable, so the nested write survives until the mod writes it back.
+ *
+ * Cache: registry["BG3SE_ModVarCache"]["<uuid>|<key>"] -> the parsed table.
+ * Invalidated whenever the variable is assigned, so the next read reflects the
+ * newly stored JSON. */
+#define MODVAR_CACHE_REGISTRY_KEY "BG3SE_ModVarCache"
+
+static void mvar_cache_key(char *out, size_t outSize, const char *mod_uuid, const char *key) {
+    snprintf(out, outSize, "%s|%s", mod_uuid ? mod_uuid : "?", key ? key : "?");
+}
+
+/* Push registry["BG3SE_ModVarCache"], creating it if needed. Leaves it on the stack. */
+static void mvar_cache_push_table(lua_State *L) {
+    lua_getfield(L, LUA_REGISTRYINDEX, MODVAR_CACHE_REGISTRY_KEY);
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1);
+        lua_newtable(L);
+        lua_pushvalue(L, -1);
+        lua_setfield(L, LUA_REGISTRYINDEX, MODVAR_CACHE_REGISTRY_KEY);
+    }
+}
+
+/* Pushes the cached table and returns true, or pushes nothing and returns false. */
+static bool mvar_cache_get(lua_State *L, const char *mod_uuid, const char *key) {
+    char ck[UVAR_GUID_LENGTH + 96];
+    mvar_cache_key(ck, sizeof(ck), mod_uuid, key);
+    mvar_cache_push_table(L);
+    lua_getfield(L, -1, ck);
+    if (lua_istable(L, -1)) {
+        lua_remove(L, -2);      /* drop the cache table, leave the value */
+        return true;
+    }
+    lua_pop(L, 2);
+    return false;
+}
+
+/* Caches the value at the top of the stack (left in place). */
+static void mvar_cache_put(lua_State *L, const char *mod_uuid, const char *key) {
+    if (!lua_istable(L, -1)) return;
+    char ck[UVAR_GUID_LENGTH + 96];
+    mvar_cache_key(ck, sizeof(ck), mod_uuid, key);
+    mvar_cache_push_table(L);
+    lua_pushvalue(L, -2);       /* the value */
+    lua_setfield(L, -2, ck);
+    lua_pop(L, 1);              /* drop the cache table */
+}
+
+void mvar_cache_invalidate(lua_State *L, const char *mod_uuid, const char *key) {
+    if (!L) return;
+    char ck[UVAR_GUID_LENGTH + 96];
+    mvar_cache_key(ck, sizeof(ck), mod_uuid, key);
+    mvar_cache_push_table(L);
+    lua_pushnil(L);
+    lua_setfield(L, -2, ck);
+    lua_pop(L, 1);
+}
+
+void mvar_cache_clear(lua_State *L) {
+    if (!L) return;
+    lua_pushnil(L);
+    lua_setfield(L, LUA_REGISTRYINDEX, MODVAR_CACHE_REGISTRY_KEY);
 }
 
 int mvar_get(lua_State *L, const char *mod_uuid, const char *key) {
@@ -1117,10 +1227,26 @@ int mvar_get(lua_State *L, const char *mod_uuid, const char *key) {
 
         case UVAR_TYPE_TABLE:
             if (var->value.string) {
+                /* Same table for every read until the variable is assigned, so
+                 * `vars.X.Y = v` survives long enough for the mod to write it
+                 * back (see the cache comment above). */
+                if (mvar_cache_get(L, mod_uuid, key)) {
+                    break;
+                }
                 const char *end = json_parse_value(L, var->value.string);
                 if (!end) {
-                    LOG_LUA_ERROR("Failed to parse stored JSON for mod %s.%s", mod_uuid, key);
+                    /* Show the payload: a variable that will not round-trip
+                     * silently reads back as nil, which looks to the mod like
+                     * its state vanished. Without the text there is nothing to
+                     * debug from. */
+                    size_t jlen = strlen(var->value.string);
+                    LOG_LUA_ERROR("Failed to parse stored JSON for mod %s.%s "
+                                  "(%zu bytes): %.400s%s",
+                                  mod_uuid, key, jlen, var->value.string,
+                                  jlen > 400 ? " [...truncated]" : "");
                     lua_pushnil(L);
+                } else {
+                    mvar_cache_put(L, mod_uuid, key);
                 }
             } else {
                 lua_pushnil(L);

@@ -4,6 +4,70 @@ All notable changes to BG3SE-macOS are documented here.
 
 ## Unreleased
 
+- **`Ext.Entity.Get(uuid)` returned a dead handle after loading a save.**
+  The GUID → handle memo (`entity_system.c`) and the cached
+  `UuidToHandleMappingComponent` were filled once and never invalidated.
+  Loading a savegame mid-session keeps the EntityWorld object but rebuilds
+  every entity with a new handle, so from then on `Ext.Entity.Get(uuid)`
+  handed back the previous session's handle: a valid-looking entity with
+  **zero components**, every property `nil`. Verified live 2026-09-07 23:16 —
+  Gale's memo said `0x200000100000093`, the live entity was
+  `0x20000080002df16` (found by scanning `GetAllEntitiesWithComponent`, which
+  was healthy throughout: 1238 ServerCharacters). This is what the
+  `attempt to index a number value (local 'entity')` bursts after a reload
+  were. Cached handles are now liveness-checked on every hit and dropped if
+  the engine no longer knows them, and both caches are cleared on
+  UnloadSession / LoadSession / BuildStory / ReloadStory. The per-lookup GUID
+  debug log (six lines *per call*, on the mod-facing path) is off by default.
+- **Crash fix — loading another save while a mod timer was running.** At
+  01:46 on 2026-09-07 the game aborted on the ServerWorker thread
+  (`COsiArgumentDesc::GetDataSrcPtr` → `std::terminate` → SIGABRT) 0.4 s after
+  `RegisterDIVFunctions` re-armed during `LoadSession`: a mod timer called
+  `Osi.IsDead`, and the cached `OsiFunctionId` belonged to the *previous*
+  story, so the query walked a half-built Osiris. `Osi.*` calls, `DB_*:Get`
+  and `DB_*:Delete` are now refused with a Lua error between story teardown
+  and the Sync-time name walk — which is what upstream effectively does, since
+  its name cache is empty in that window. No legitimate Osi call happens
+  there (measured across a full load).
+- **Osiris brought in line with upstream.** The whole `Osi.*` / `Ext.Osiris`
+  surface was diffed against Norbyte's implementation function by function —
+  see `docs/upstream-divergence-audit.md` for the table (upstream file:line,
+  port file:line, mod impact, fix). Mods are only ever tested against upstream,
+  so every "works differently but fine" was a latent break. Fixed in this
+  build:
+  - **Engine functions are chosen by argument count.** `Osi.MakePlayer(guid)`
+    resolved the 3-argument overload and padded `(guid, "", 0)`, so created
+    companions were never assigned to a user — no Equip entry in their
+    right-click menu and missing from "Send to". A count no overload accepts
+    now raises, exactly as upstream does.
+  - **Unknown symbols are `nil`.** `Osi.<anything>` used to return (and cache)
+    a callable closure, so `if Osi.Foo then` was true for every name.
+  - **Wrong-case symbols warn** with upstream's `COMPATIBILITY WARNING` and
+    resolve to the canonical name instead of silently failing.
+  - **Argument types are checked, not coerced.** A `nil` or number where a
+    `CHARACTER`/`STRING` is declared raised nothing and reached Osiris as
+    `""`/`0`; it now errors with upstream's message. Integer-rooted type
+    aliases (`CRITICALITYTYPE`, `DEATHTYPE`, `ARMOURSET`, …) were marshalled as
+    strings.
+  - **Query returns match upstream:** a query with no OUT params returns a
+    boolean (it returned `0`/`1`, and `0` is truthy in Lua); a failed query
+    returns one `nil` per OUT param; a null string is `nil`, not `""`.
+  - **`DB_*:Delete()` accepts `nil` wildcards and deletes every matching row**
+    (it rejected `nil` and erased only the first match). `:Get()` and
+    `:Delete()` on an unknown name or arity now raise
+    `No database named 'X(N)' exists` instead of returning an empty table.
+  - **`Ext.Osiris.UnregisterListener(id)`** exists (it did not); the listener
+    table grows instead of silently dropping the 513th listener; an invalid
+    hook type raises; and handler errors are logged at error level with a Lua
+    traceback (`Osiris event handler failed: …`).
+  - **Six hand-rolled `Osi.*` stubs removed** — `GetDistanceTo` (returned 0.0),
+    `SpeakerGetDialog` and `DialogGetNumberOfInvolvedPlayers` (ignored their
+    arguments), `DialogRequestStop`, `QRY_StartDialog_Fixed` (returned 0
+    without starting a dialog), and the `GetHostCharacter` global (a heuristic
+    that shadowed the real engine query). All now dispatch for real.
+  - Known gap, deferred: subscribing to a `DB_*`/`PROC_*`/`QRY_*` name still
+    registers without error and never fires — that needs the RETE node hooks
+    upstream installs at story load.
 - **PersistentVars actually persist.** Every file in
   `~/Library/Application Support/BG3SE/persistentvars/` was the 4-byte `null`:
   `persist_save_all()` took `lua_gettop()` *after* `luaL_buffinit()`, which in

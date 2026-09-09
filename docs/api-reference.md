@@ -1029,14 +1029,26 @@ Interface to the Osiris scripting engine. **Server-only** - Osiris runs on the s
 
 | API | Status | Ctx | Description |
 |-----|--------|-----|-------------|
-| `Ext.Osiris.RegisterListener(event, arity, timing, callback)` | ✅ | S | Register Osiris event callback |
-| `Ext.Osiris.NewQuery(name, signature, handler)` | ✅ | S | Register custom query (returns values) |
-| `Ext.Osiris.NewCall(name, signature, handler)` | ✅ | S | Register custom call (no return) |
-| `Ext.Osiris.NewEvent(name, signature)` | ✅ | S | Register custom event |
-| `Ext.Osiris.RaiseEvent(name, ...)` | ✅ | S | Raise a custom event to dispatch to listeners |
-| `Ext.Osiris.GetCustomFunctions()` | ✅ | S | Get table of all registered custom functions (debug) |
+| `Ext.Osiris.RegisterListener(event, arity, timing, callback)` | ✅ | S | Register Osiris event callback; returns a subscription id |
+| `Ext.Osiris.UnregisterListener(id)` | ✅ | S | Remove a subscription; `true` if it was live, `false` otherwise |
+| `Ext.Osiris.NewQuery(name, signature, handler)` | 🍎 | S | Register custom query (returns values) |
+| `Ext.Osiris.NewCall(name, signature, handler)` | 🍎 | S | Register custom call (no return) |
+| `Ext.Osiris.NewEvent(name, signature)` | 🍎 | S | Register custom event |
+| `Ext.Osiris.RaiseEvent(name, ...)` | 🍎 | S | Raise a custom event to dispatch to listeners |
+| `Ext.Osiris.GetCustomFunctions()` | 🍎 | S | Get table of all registered custom functions (debug) |
 
-**Timing values:** `"before"` or `"after"`
+🍎 = **macOS-port-only.** Upstream's `Ext.Osiris` is exactly `RegisterListener`
+and `UnregisterListener` — nothing else. Custom Osiris functions (the DOS2
+extender's `NewCall`/`NewQuery`/`NewEvent`) do not exist in BG3SE at all, so no
+mod written against upstream calls them; they are kept here for the port's own
+tooling and for mods authored against this port.
+
+**Timing values:** `"before"`, `"after"`, `"beforeDelete"` or `"afterDelete"`.
+Anything else raises `Hook type must be 'before', 'beforeDelete', 'after' or
+'afterDelete'` (upstream `LuaServer.cpp`). Note that only engine *events*
+currently dispatch on this port: database inserts/deletes, PROC calls and QRY
+calls are not yet hooked, so `beforeDelete`/`afterDelete` (and `before`/`after`
+on a `DB_*`/`PROC_*`/`QRY_*` name) register without error but never fire.
 
 **Example - Event Listener:**
 ```lua
@@ -1189,17 +1201,28 @@ Available in the console for quick debugging:
 
 ## Osi Namespace
 
-Osiris function bindings. Key functions return real game data discovered by observing Osiris events. **Server-only** - Osiris runs on the server context.
+Every Osiris symbol the running story defines, resolved dynamically through
+`Osi`'s `__index` — there are no hand-written per-function bindings. **Server-only**
+- Osiris runs on the server context.
 
-| API | Status | Ctx | Description |
-|-----|--------|-----|-------------|
-| `Osi.DB_Players:Get(nil)` | ✅ | S | Returns real player GUIDs |
-| `Osi.IsTagged(char, tag)` | ✅ | S | Returns true for players in active dialog |
-| `Osi.DialogGetNumberOfInvolvedPlayers(id)` | ✅ | S | Returns 1 (single-player) |
-| `Osi.SpeakerGetDialog(char, idx)` | ✅ | S | Returns current dialog resource |
-| `Osi.GetDistanceTo(char1, char2)` | ⏳ | S | Stub - always returns 0 |
-| `Osi.DialogRequestStop(char)` | ⏳ | S | Stub - no-op |
-| `Osi.QRY_StartDialog_Fixed(res, char)` | ⏳ | S | Stub - returns false |
+| Form | Ctx | Behaviour |
+|------|-----|-----------|
+| `Osi.<Call>(...)` | S | Dispatches the engine call; returns nothing |
+| `Osi.<Query>(...)` | S | Returns one value per OUT param (all `nil` if the query fails); a query with no OUT params returns a **boolean** |
+| `Osi.<Proc>(...)` / `Osi.<Event>(...)` | S | Story symbols with no dispatch id: inserted into their RETE node |
+| `Osi.DB_<Name>:Get(...)` | S | Rows of the database matching the filter (`nil` = wildcard) |
+| `Osi.DB_<Name>:Delete(...)` | S | Deletes **every** matching row (`nil` = wildcard) |
+| `Osi.DB_<Name>(...)` | S | Inserts a tuple |
+| `Osi.<Unknown>` | S | `nil`, once the story is loaded — use it for feature detection |
+
+Overloads are selected by the number of arguments you pass, matching upstream:
+`Osi.MakePlayer(char)` and `Osi.MakePlayer(char, owner, canReassign)` are
+different engine functions. Passing a count no overload accepts raises
+`No function named 'X' exists that can be called with N parameters.`
+
+Argument types are checked against the story's declared parameter types:
+a number where a `CHARACTER`/`STRING` is declared raises `String expected for
+argument N, got number`, and vice versa (upstream `ValueHelpers.inl`).
 
 ---
 

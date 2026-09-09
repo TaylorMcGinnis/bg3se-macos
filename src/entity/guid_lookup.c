@@ -65,6 +65,7 @@ static int hex_char_to_int(char c) {
 }
 
 // Helper: Parse N hex characters into a uint64_t
+__attribute__((unused))
 static bool parse_hex_bytes(const char *str, int num_chars, uint64_t *out) {
     *out = 0;
     for (int i = 0; i < num_chars; i++) {
@@ -206,8 +207,13 @@ void guid_to_string(const Guid *guid, char *out_str) {
 // HashMap Lookup
 // ============================================================================
 
-// Debug flag - set to 1 to enable verbose GUID lookup logging
-static int g_guid_lookup_debug = 1;
+// Debug flag - set to 1 to enable verbose GUID lookup logging.
+//
+// Off by default: every lookup logged the whole hashmap header plus its first
+// three keys, and this runs on the mod-facing Ext.Entity.Get path. With a large
+// profile that is a measurable share of a multi-hundred-megabyte session log,
+// and it buries the lines that matter.
+static int g_guid_lookup_debug = 0;
 
 EntityHandle hashmap_lookup_guid(const HashMapGuidEntityHandle *hashmap, const Guid *guid) {
     if (!hashmap || !guid) {

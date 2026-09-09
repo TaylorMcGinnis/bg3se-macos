@@ -15,8 +15,10 @@
 #include <stdbool.h>
 #include <lua.h>
 
-// Maximum number of concurrent timers
-#define TIMER_MAX_COUNT 256
+// Initial timer pool / free-list capacity; the pool grows on demand
+// (upstream uses an unbounded SaltedPool, and a large load order schedules
+// hundreds of timers in a single LevelGameplayStarted burst).
+#define TIMER_INITIAL_CAPACITY 256
 
 // Timer handle type (returned to Lua)
 typedef uint64_t TimerHandle;

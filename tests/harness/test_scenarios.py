@@ -125,13 +125,21 @@ def test_baselines_parse_and_cover_every_scenario():
         )
 
 
-def test_max_osiris_listeners_is_512():
+def test_osiris_listener_table_starts_at_512_and_grows():
     header = (ROOT / "src" / "lua" / "lua_osiris.h").read_text()
     match = re.search(r"#define\s+MAX_OSIRIS_LISTENERS\s+(\d+)", header)
     assert match, "MAX_OSIRIS_LISTENERS not found in lua_osiris.h"
-    assert int(match.group(1)) == 512, (
-        f"MAX_OSIRIS_LISTENERS is {match.group(1)}, expected 512 — "
+    assert int(match.group(1)) >= 512, (
+        f"initial listener capacity is {match.group(1)}, expected >= 512 — "
         f"64 was exhausted by real mod stacks (Expansion Level 20, Wave 5)"
+    )
+    # Upstream's OsirisCallbackManager has no cap at all: the count is only the
+    # first allocation, and the table must grow rather than refuse the 513th
+    # RegisterListener.
+    source = (ROOT / "src" / "lua" / "lua_osiris.c").read_text()
+    assert "realloc" in source, (
+        "listener table no longer grows on demand — a fixed cap silently drops "
+        "listeners once a large mod profile exceeds it"
     )
 
 

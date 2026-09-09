@@ -29,6 +29,13 @@ the last complete pass):
   both rows said the infrastructure did not exist; the Wave 7 A8 work they each
   named as their own unlock path had already shipped. Live-verified.
 
+**Osiris deferrals (2026-09-07)** live in
+[`upstream-divergence-audit.md`](upstream-divergence-audit.md), which lists them
+against the upstream code they diverge from. The ones that fail *silently* rather
+than warning — a listener on a `DB_*`/`PROC_*`/`QRY_*` name registers and never
+fires (audit #25) — are the exception to the doctrine above and are the next
+piece of work.
+
 **Counting note.** Four rows moved out of "deferred" on 2026-08-27 by
 correction rather than by new work — they were already implemented and the
 registry had not caught up. Anyone recomputing parity from this file should

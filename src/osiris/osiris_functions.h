@@ -91,16 +91,46 @@ void osi_func_enumerate_by_name(void);
  */
 bool osi_func_refresh_if_stale(void);
 
+/**
+ * Clear the refresh rate-limit state (attempt budget and last-refresh time).
+ * Call when the story is torn down: the next session's misses must be able to
+ * trigger a refresh even if the previous one used the whole budget.
+ */
+void osi_func_refresh_reset(void);
+
+/**
+ * Case-insensitive name lookups, for the "referenced using incorrect case"
+ * compatibility path (upstream keeps a lowercase legacy-name index).
+ * Return the canonical spelling, or NULL when nothing matches ignoring case
+ * or the given spelling was already exact.
+ *   osi_func_lookup_name_ci: engine function cache (linear; miss path only)
+ *   osi_db_lookup_name_ci:   story/name-index registry (hashed)
+ */
+const char *osi_func_lookup_name_ci(const char *name);
+const char *osi_db_lookup_name_ci(const char *name);
+
 /** Iterate the name -> def registry. Returns 0 past the end. */
 int osi_db_entry(int i, const char **outName, void **outDef);
 
 /**
  * Database registry (databases have OsiFunctionId==0 and cannot be id-cached).
- * osi_db_register: name -> COsiFunctionData* (returns 1 if newly added).
- * osi_db_lookup: returns the COsiFunctionData* for a DB name, or NULL.
+ * Osiris overloads by arity (DB_Dialogs/2 .. /5 are distinct databases), so
+ * entries are keyed "Name/Arity" like upstream's name index.
+ * osi_db_register_arity: (name, arity, inArgs) -> COsiFunctionData* (1 if new).
+ * osi_db_register: arity-less registration (filed as arity 0).
+ * osi_db_lookup: bare name -> the lowest-arity overload, or NULL.
+ * osi_db_lookup_arity: exact "Name/Arity", or NULL.
+ * osi_db_lookup_args: the overload whose *input* parameter count equals the
+ *   caller's argument count (upstream OsirisNameCache::GetFunction), or NULL.
+ * osi_def_read_arity: total (in+out) and out-param counts from a def's Signature.
  */
+#define OSI_DB_MAX_OUT_PARAMS 8
+int   osi_db_register_arity(const char *name, unsigned arity, unsigned inArgs, void *def);
 int   osi_db_register(const char *name, void *def);
 void *osi_db_lookup(const char *name);
+void *osi_db_lookup_arity(const char *name, unsigned arity);
+void *osi_db_lookup_args(const char *name, unsigned nargs);
+bool  osi_def_read_arity(void *def, unsigned *outArity, unsigned *outOutParams);
 int   osi_db_count(void);
 void  osi_db_clear(void);   // wipe registry (defs go stale across save reloads)
 
@@ -148,6 +178,20 @@ uint32_t osi_func_lookup_id(const char *name);
  * @return 1 on success, 0 if not found
  */
 int osi_func_get_info(const char *name, uint8_t *out_arity, uint8_t *out_type);
+
+/**
+ * Every cached engine overload of `name`, in cache order.
+ *
+ * Osiris overloads by arity: BG3 registers MakePlayer/1, /2 and /3 (and
+ * ApplyStatus/4 and /5, 84 such names) as distinct functions with distinct
+ * ids. osi_func_lookup_id() returns whichever was cached first, which is how
+ * Osi.MakePlayer(guid) dispatched the 3-parameter overload with a blank owner.
+ * Upstream keys its name cache by input-parameter count
+ * (Lua/Osiris/NameCache.inl) and picks by lua_gettop(); the dispatcher does
+ * the same over this list. Returns the number of entries written (<= max).
+ */
+#define OSI_MAX_OVERLOADS 8
+int osi_func_lookup_overloads(const char *name, const CachedFunction **out, int max);
 
 /**
  * Get the encoded OsirisFunctionHandle for a function by name.

@@ -226,6 +226,16 @@ void mvar_set(lua_State *L, const char *mod_uuid, const char *key, int value_ind
 int mvar_get(lua_State *L, const char *mod_uuid, const char *key);
 
 /**
+ * Table-valued mod variables are cached per (mod, key) so repeated reads return
+ * the SAME Lua table. Without that, `vars.X.Y = v` mutates a throwaway parse and
+ * the mod's read-modify-write-back pattern silently loses the nested write.
+ * mvar_cache_invalidate drops one entry (done automatically on assignment);
+ * mvar_cache_clear drops all of them, for when storage is reloaded wholesale.
+ */
+void mvar_cache_invalidate(lua_State *L, const char *mod_uuid, const char *key);
+void mvar_cache_clear(lua_State *L);
+
+/**
  * Mark mod variables as dirty.
  */
 void mvar_mark_dirty(const char *mod_uuid, const char *key);

@@ -9,6 +9,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>   /* strcasecmp */
+#include <ctype.h>
 #include <stdint.h>
 
 // ============================================================================
@@ -123,10 +125,41 @@ static int is_valid_name_start(char c) {
 #define FUNCSIG_OUTPARAMLIST_OFFSET  0x18  /* FuncSigOutParamList.Params* (bitmask) */
 #define FUNCSIG_OUTPARAMCOUNT_OFFSET 0x20  /* FuncSigOutParamList.Count (uint32_t) */
 
-/* FunctionParamList field offsets */
+/* COsiValueTypeList (the Signature's parameter list) -- NOT the Windows
+ * List<T> with a separately allocated head. This build's list embeds its
+ * sentinel and keeps the size last (libOsiris COsiValueTypeList::Read 0x40618):
+ *
+ *   +0x00 vptr
+ *   +0x08 sentinel.prev  (== list+8 when empty)
+ *   +0x10 sentinel.next  (first node; == list+8 when empty)
+ *   +0x18 size           (uint64_t, in+out params)
+ *   node: +0x00 prev, +0x08 next, +0x10 uint16 type
+ *
+ * Reading the size at +0x10 (the old Windows offset) returns the low half of
+ * the first-node pointer, which fails the <= 20 sanity check, so every def
+ * came out as arity 0 and the "Name/Arity" registry collapsed all overloads
+ * onto one key. main.c osi_sig_params walks the same layout. */
 #define PARAMLIST_VMT_OFFSET         0x00
-#define PARAMLIST_HEAD_OFFSET        0x08  /* List<FunctionParamDesc>.Head* */
-#define PARAMLIST_SIZE_OFFSET        0x10  /* List<FunctionParamDesc>.Size (uint32_t, total in+out) */
+#define PARAMLIST_SENTINEL_OFFSET    0x08  /* address the last node's next points back to */
+#define PARAMLIST_FIRST_OFFSET       0x10  /* first node */
+#define PARAMLIST_SIZE_OFFSET        0x18  /* uint64_t size (total in+out) */
+#define PARAMLIST_MAX_PARAMS         32
+
+/* Signature+0x10 -> COsiValueTypeList -> size. false if unreadable/implausible. */
+static bool osi_sig_read_param_count(void *sigPtr, unsigned *outCount) {
+    void *plist = NULL;
+    if (!sigPtr ||
+        !safe_memory_read_pointer((mach_vm_address_t)sigPtr + FUNCSIG_PARAMS_OFFSET, &plist) || !plist) {
+        return false;
+    }
+    uint64_t size = 0;
+    if (!safe_memory_read((mach_vm_address_t)plist + PARAMLIST_SIZE_OFFSET, &size, sizeof(size)) ||
+        size > PARAMLIST_MAX_PARAMS) {
+        return false;
+    }
+    *outCount = (unsigned)size;
+    return true;
+}
 
 /* Thread-local buffer for extracted function names */
 static __thread char s_extractedName[128];
@@ -331,16 +364,29 @@ void osi_func_cache(const char *name, uint32_t funcId, uint8_t arity, uint8_t ty
     cf->arity = arity;
     cf->type = type;
     cf->handle = 0;
+    cf->nextOverload = -1;
 
     // Add to ID hash table (simple - just store first match at hash location)
     if (g_funcIdHashTable[hash] < 0) {
         g_funcIdHashTable[hash] = (int32_t)g_funcCacheCount;
     }
 
-    // Add to name hash table for O(1) name→index lookups
+    // Add to name hash table for O(1) name→index lookups. The slot holds the
+    // first entry of a name; later entries with the SAME name are Osiris
+    // overloads (distinct ids, distinct arities) and are appended to that
+    // entry's chain so osi_func_lookup_overloads() can offer all of them.
+    // A slot already taken by a different name is a hash collision and is
+    // left alone -- lookups fall back to a linear scan in that case.
     int nameHash = func_name_hash(cf->name);
-    if (g_funcNameHashTable[nameHash] < 0) {
+    int32_t head = g_funcNameHashTable[nameHash];
+    if (head < 0) {
         g_funcNameHashTable[nameHash] = (int32_t)g_funcCacheCount;
+    } else if (strcmp(g_funcCache[head].name, cf->name) == 0) {
+        int32_t tail = head;
+        while (g_funcCache[tail].nextOverload >= 0) {
+            tail = g_funcCache[tail].nextOverload;
+        }
+        g_funcCache[tail].nextOverload = (int32_t)g_funcCacheCount;
     }
 
     g_funcCacheCount++;
@@ -393,7 +439,7 @@ int osi_func_cache_by_id(uint32_t funcId) {
         const char *name = extract_func_name_from_def(funcDef);
         if (name && name[0]) {
             /* Read total param count (in+out) via pointer chain:
-             * funcDef+0x18 → Signature → Signature+0x10 → ParamList* → ParamList+0x10 → Size
+             * funcDef+0x18 → Signature → Signature+0x10 → ParamList* → COsiValueTypeList+0x18 → size
              * This gives Params.Size which includes both input AND output params.
              * Windows BG3SE uses this for query dispatch (Function.inl:OsiQuery). */
             uint8_t arity = 0;
@@ -401,51 +447,47 @@ int osi_func_cache_by_id(uint32_t funcId) {
                 /* We already know funcDef+0x18 → Signature works (name extraction uses it).
                  * Re-read Signature pointer for the param chain. */
                 void *sigPtr = NULL;
-                if (safe_memory_read_pointer((mach_vm_address_t)funcDef + OSIFUNCDEF_SIGNATURE_OFFSET, &sigPtr) && sigPtr) {
-                    void *paramListPtr = NULL;
-                    if (safe_memory_read_pointer((mach_vm_address_t)sigPtr + FUNCSIG_PARAMS_OFFSET, &paramListPtr) && paramListPtr) {
-                        uint32_t paramSize = 0;
-                        if (safe_memory_read_u32((mach_vm_address_t)paramListPtr + PARAMLIST_SIZE_OFFSET, &paramSize)) {
-                            arity = (paramSize <= 20) ? (uint8_t)paramSize : 0;
-                        }
-                    }
+                unsigned paramCount = 0;
+                if (safe_memory_read_pointer((mach_vm_address_t)funcDef + OSIFUNCDEF_SIGNATURE_OFFSET, &sigPtr) &&
+                    osi_sig_read_param_count(sigPtr, &paramCount)) {
+                    arity = (uint8_t)paramCount;
                 }
             }
 
-            /* Read FunctionType from funcDef + 0x28 (Windows layout: Osiris.h)
-             * Validated by safe_memory_read — same pattern as paramCount above.
-             * Fallback: guess from name prefix (QRY_=Query, DB_=Database, etc.) */
+            /* Read FunctionType from funcDef + 0x24 (Osiris.h: Type precedes
+             * Key[4] at +0x28). This used to read +0x28, i.e. Key[0], which
+             * for engine functions is the EoC function type (Call=1, Query=2,
+             * Event=3) and not the Osiris FunctionType (Event=1, Query=2,
+             * Call=3): every engine call was cached as an "Event". Harmless
+             * for dispatch (both go through DivCall) but wrong in every log
+             * line and probe. The def samples in the name-index walk pin
+             * +0x24 as the genuine field (4 for DB_*, 5 for PROC_*, 2/3 for
+             * queries/calls). Fallback: guess from the name prefix. */
             uint32_t rawType = 0;
             uint8_t type = osi_func_guess_type(name);  // Smart fallback from name prefix
-            if (safe_memory_read_u32((mach_vm_address_t)funcDef + 0x28, &rawType)) {
+            if (safe_memory_read_u32((mach_vm_address_t)funcDef + 0x24, &rawType)) {
                 if (rawType == OSI_FUNC_UNKNOWN) {
-                    LOG_OSIRIS_DEBUG("funcId=0x%08x '%s': type=UNKNOWN at +0x28, using guess=%s",
+                    LOG_OSIRIS_DEBUG("funcId=0x%08x '%s': type=UNKNOWN at +0x24, using guess=%s",
                                     funcId, name, osi_func_type_str(type));
                 } else if (rawType >= OSI_FUNC_EVENT && rawType <= OSI_FUNC_USERQUERY) {
                     type = (uint8_t)rawType;
                 } else {
-                    LOG_OSIRIS_DEBUG("funcId=0x%08x '%s': invalid type %u at +0x28, using guess=%s",
+                    LOG_OSIRIS_DEBUG("funcId=0x%08x '%s': invalid type %u at +0x24, using guess=%s",
                                     funcId, name, rawType, osi_func_type_str(type));
                 }
             }
 
             /* Read Key[4] from funcDef + 0x28 to compute the real handle.
-             * Key[0]=type, Key[1]=Part2, Key[2]=funcIndex, Key[3]=Part4
-             * Handle = OsirisFunctionHandle(Key[0..3]) — typically equals funcId.
-             *
-             * NOTE: Windows layout has Key at +0x28 (after Type at +0x24).
-             * Previously we read from +0x2C which was off by 4. */
+             * Key[0]=EoC type, Key[1]=Part2, Key[2]=funcIndex, Key[3]=Part4
+             * Handle = OsirisFunctionHandle(Key[0..3]) — equals funcId for
+             * engine functions (verified: TriggerResetAtmosphere Key={1,0,1230,1}
+             * encodes to its OsiFunctionId 0x80002671). */
             uint32_t keys[4] = {0};
             uint32_t handle = 0;
             if (safe_memory_read((mach_vm_address_t)funcDef + 0x28,
                                  keys, sizeof(keys))) {
-                /* Cross-validate: Key[0] should match type from +0x24/+0x28. */
                 if (keys[0] <= OSI_FUNC_USERQUERY) {
                     handle = osi_encode_handle(keys[0], keys[1], keys[2], keys[3]);
-                    if (s_diagLogCount < MAX_DIAG_LOGS && keys[0] != type) {
-                        LOG_OSIRIS_WARN("funcId=0x%08x '%s': Key[0]=%u != type=%u "
-                                       "(using Key[0])", funcId, name, keys[0], type);
-                    }
                 } else {
                     if (s_diagLogCount < MAX_DIAG_LOGS) {
                         LOG_OSIRIS_WARN("funcId=0x%08x '%s': Key[0]=%u out of range, "
@@ -723,26 +765,27 @@ static int osi_func_cache_def(void *funcDef, uint32_t funcId) {
     const char *name = extract_func_name_from_def(funcDef);
     if (!name || !name[0]) return 0;
 
-    /* Arity: funcDef+0x18 → Signature → +0x10 ParamList → +0x10 Size (in+out). */
+    /* Arity: funcDef+0x18 → Signature → +0x10 COsiValueTypeList → +0x18 size (in+out). */
     uint8_t arity = 0;
     void *sigPtr = NULL;
-    if (safe_memory_read_pointer((mach_vm_address_t)funcDef + OSIFUNCDEF_SIGNATURE_OFFSET, &sigPtr) && sigPtr) {
-        void *paramListPtr = NULL;
-        if (safe_memory_read_pointer((mach_vm_address_t)sigPtr + FUNCSIG_PARAMS_OFFSET, &paramListPtr) && paramListPtr) {
-            uint32_t paramSize = 0;
-            if (safe_memory_read_u32((mach_vm_address_t)paramListPtr + PARAMLIST_SIZE_OFFSET, &paramSize)) {
-                arity = (paramSize <= 20) ? (uint8_t)paramSize : 0;
-            }
-        }
+    unsigned paramCount = 0;
+    if (safe_memory_read_pointer((mach_vm_address_t)funcDef + OSIFUNCDEF_SIGNATURE_OFFSET, &sigPtr) &&
+        osi_sig_read_param_count(sigPtr, &paramCount)) {
+        arity = (uint8_t)paramCount;
     }
 
-    /* Type + Key[4] at funcDef+0x28 (same layout the id-based path uses). */
+    /* Type at funcDef+0x24, Key[4] at +0x28 (same layout the id-based path
+     * uses; Key[0] is the EoC type, not the Osiris FunctionType). */
     uint8_t type = osi_func_guess_type(name);
+    uint32_t rawType = 0;
+    if (safe_memory_read_u32((mach_vm_address_t)funcDef + 0x24, &rawType) &&
+        rawType >= OSI_FUNC_EVENT && rawType <= OSI_FUNC_USERQUERY) {
+        type = (uint8_t)rawType;
+    }
     uint32_t keys[4] = {0};
     uint32_t handle = funcId;
     if (safe_memory_read((mach_vm_address_t)funcDef + 0x28, keys, sizeof(keys))) {
         if (keys[0] >= OSI_FUNC_EVENT && keys[0] <= OSI_FUNC_USERQUERY) {
-            type = (uint8_t)keys[0];
             handle = osi_encode_handle(keys[0], keys[1], keys[2], keys[3]);
         }
     }
@@ -764,9 +807,26 @@ static int osi_func_cache_def(void *funcDef, uint32_t funcId) {
 /* Sized for the whole name index (~20k defs), not just databases. Story
  * functions carry no dispatch handle -- their Key[4] block and OsiFunctionId
  * are all zero -- so name -> def is the only way to reach them, and that makes
- * this registry the dispatch path for procs as well as databases. */
+ * this registry the dispatch path for procs as well as databases.
+ *
+ * Osiris overloads by arity: DB_Dialogs/2, /3, /4 and /5 are four distinct
+ * databases sharing one name (upstream keys its name index by "Name/Arity",
+ * LookupOsiFunction in Lua/Osiris/ValueHelpers.inl). Keyed by bare name, the
+ * last overload the tree walk visited silently replaced the others, so
+ * Osi.DB_Dialogs:Get(char, dialog) read a 5-column database and returned
+ * nothing for every companion. Entries are therefore keyed by "Name/Arity";
+ * the bare name resolves to the lowest arity so old single-name callers keep
+ * working, and osi_db_lookup_args() maps a caller's input-argument count to
+ * the overload whose inputs (arity minus out params) match, which is what
+ * upstream's OsirisNameCache::inputArgsToArity does. */
 #define MAX_DATABASES 32768
-typedef struct { char name[96]; void *def; } DbRegEntry;
+typedef struct {
+    char name[96];      /* bare name (what osi_db_entry reports) */
+    char key[104];      /* "Name/Arity" -- the hash key */
+    void *def;
+    uint8_t arity;      /* total params, in + out */
+    uint8_t inArgs;     /* arity minus out params */
+} DbRegEntry;
 static DbRegEntry g_dbReg[MAX_DATABASES];
 static int g_dbRegCount = 0;
 
@@ -779,7 +839,13 @@ static int g_dbRegCount = 0;
 #define DBREG_HASH_MASK (DBREG_HASH_SIZE - 1)
 #define DBREG_EMPTY (-1)
 
+/* Three open-addressed index tables over g_dbReg: one keyed by "Name/Arity"
+ * (every overload), one by bare name (the lowest-arity overload), and one by
+ * case-folded bare name (upstream's "legacy name" index, used only to tell a
+ * mod that it spelled a symbol with the wrong case). */
 static int32_t g_dbRegHash[DBREG_HASH_SIZE];
+static int32_t g_dbRegBareHash[DBREG_HASH_SIZE];
+static int32_t g_dbRegCiHash[DBREG_HASH_SIZE];
 static bool g_dbRegHashReady = false;
 
 static uint32_t db_name_hash(const char *s) {
@@ -791,20 +857,49 @@ static uint32_t db_name_hash(const char *s) {
     return h;
 }
 
+static uint32_t db_name_hash_ci(const char *s) {
+    uint32_t h = 2166136261u;           /* FNV-1a over the case-folded name */
+    for (; *s; s++) {
+        h ^= (unsigned char)tolower((unsigned char)*s);
+        h *= 16777619u;
+    }
+    return h;
+}
+
+static uint32_t db_hash_slot_ci(const char *name) {
+    uint32_t i = db_name_hash_ci(name) & DBREG_HASH_MASK;
+    for (;;) {
+        int32_t at = g_dbRegCiHash[i];
+        if (at == DBREG_EMPTY) return i;
+        if (strcasecmp(g_dbReg[at].name, name) == 0) return i;
+        i = (i + 1) & DBREG_HASH_MASK;
+    }
+}
+
 static void db_hash_reset(void) {
-    for (uint32_t i = 0; i < DBREG_HASH_SIZE; i++) g_dbRegHash[i] = DBREG_EMPTY;
+    for (uint32_t i = 0; i < DBREG_HASH_SIZE; i++) {
+        g_dbRegHash[i] = DBREG_EMPTY;
+        g_dbRegBareHash[i] = DBREG_EMPTY;
+        g_dbRegCiHash[i] = DBREG_EMPTY;
+    }
     g_dbRegHashReady = true;
 }
 
-/* Slot holding `name`, or the empty slot it belongs in. */
-static uint32_t db_hash_slot(const char *name) {
-    uint32_t i = db_name_hash(name) & DBREG_HASH_MASK;
+/* Slot in `table` holding `key`, or the empty slot it belongs in. `bare`
+ * selects which entry field the table is keyed on. */
+static uint32_t db_hash_slot_in(int32_t *table, const char *key, bool bare) {
+    uint32_t i = db_name_hash(key) & DBREG_HASH_MASK;
     for (;;) {
-        int32_t at = g_dbRegHash[i];
+        int32_t at = table[i];
         if (at == DBREG_EMPTY) return i;
-        if (strcmp(g_dbReg[at].name, name) == 0) return i;
+        const char *have = bare ? g_dbReg[at].name : g_dbReg[at].key;
+        if (strcmp(have, key) == 0) return i;
         i = (i + 1) & DBREG_HASH_MASK;
     }
+}
+
+static void db_make_key(char *out, size_t outSize, const char *name, unsigned arity) {
+    snprintf(out, outSize, "%s/%u", name, arity);
 }
 
 void osi_db_clear(void) {
@@ -812,30 +907,131 @@ void osi_db_clear(void) {
     db_hash_reset();
 }
 
-int osi_db_register(const char *name, void *def) {
+int osi_db_register_arity(const char *name, unsigned arity, unsigned inArgs, void *def) {
     if (!name || !name[0] || !def) return 0;
     if (!g_dbRegHashReady) db_hash_reset();
+    if (arity > 255) arity = 255;
+    if (inArgs > arity) inArgs = arity;
 
-    uint32_t slot = db_hash_slot(name);
+    char key[104];
+    db_make_key(key, sizeof(key), name, arity);
+
+    uint32_t slot = db_hash_slot_in(g_dbRegHash, key, false);
     int32_t at = g_dbRegHash[slot];
     if (at != DBREG_EMPTY) {
         g_dbReg[at].def = def;          /* refresh on re-enumeration */
+        g_dbReg[at].inArgs = (uint8_t)inArgs;
         return 0;
     }
 
     if (g_dbRegCount >= MAX_DATABASES) return 0;
-    strncpy(g_dbReg[g_dbRegCount].name, name, sizeof(g_dbReg[0].name) - 1);
-    g_dbReg[g_dbRegCount].name[sizeof(g_dbReg[0].name) - 1] = '\0';
-    g_dbReg[g_dbRegCount].def = def;
+    DbRegEntry *e = &g_dbReg[g_dbRegCount];
+    strncpy(e->name, name, sizeof(e->name) - 1);
+    e->name[sizeof(e->name) - 1] = '\0';
+    strncpy(e->key, key, sizeof(e->key) - 1);
+    e->key[sizeof(e->key) - 1] = '\0';
+    e->def = def;
+    e->arity = (uint8_t)arity;
+    e->inArgs = (uint8_t)inArgs;
     g_dbRegHash[slot] = g_dbRegCount;
+
+    /* Bare-name index: keep the lowest arity so the choice is deterministic
+     * rather than tree-walk order. */
+    uint32_t bslot = db_hash_slot_in(g_dbRegBareHash, name, true);
+    int32_t bat = g_dbRegBareHash[bslot];
+    if (bat == DBREG_EMPTY || g_dbReg[bat].arity > e->arity) {
+        g_dbRegBareHash[bslot] = g_dbRegCount;
+    }
+
+    /* Case-folded index: first spelling registered wins (they only differ by
+     * case, and the canonical name is whatever the story declares). */
+    uint32_t cslot = db_hash_slot_ci(name);
+    if (g_dbRegCiHash[cslot] == DBREG_EMPTY) {
+        g_dbRegCiHash[cslot] = g_dbRegCount;
+    }
+
     g_dbRegCount++;
     return 1;
 }
 
+/* The canonical spelling of a symbol referenced with the wrong case, or NULL
+ * when nothing matches (or the spelling was already exact). */
+const char *osi_db_lookup_name_ci(const char *name) {
+    if (!name || !*name || !g_dbRegHashReady) return NULL;
+    int32_t at = g_dbRegCiHash[db_hash_slot_ci(name)];
+    if (at == DBREG_EMPTY) return NULL;
+    if (strcmp(g_dbReg[at].name, name) == 0) return NULL;
+    return g_dbReg[at].name;
+}
+
+/* Arity-less registration: the signature could not be read. Filed as arity 0
+ * so it is still reachable by bare name. */
+int osi_db_register(const char *name, void *def) {
+    return osi_db_register_arity(name, 0, 0, def);
+}
+
 void *osi_db_lookup(const char *name) {
     if (!name || !g_dbRegHashReady) return NULL;
-    int32_t at = g_dbRegHash[db_hash_slot(name)];
+    int32_t at = g_dbRegBareHash[db_hash_slot_in(g_dbRegBareHash, name, true)];
     return (at == DBREG_EMPTY) ? NULL : g_dbReg[at].def;
+}
+
+void *osi_db_lookup_arity(const char *name, unsigned arity) {
+    if (!name || !g_dbRegHashReady) return NULL;
+    char key[104];
+    db_make_key(key, sizeof(key), name, arity);
+    int32_t at = g_dbRegHash[db_hash_slot_in(g_dbRegHash, key, false)];
+    return (at == DBREG_EMPTY) ? NULL : g_dbReg[at].def;
+}
+
+/* Overload whose input parameters number `nargs`. Databases and procs have no
+ * out params, so the total arity is nargs; a query with k out params is the
+ * nargs+k overload. Probe upward and accept the first whose inArgs match, so a
+ * 2-argument call never lands on a 3-column database. */
+void *osi_db_lookup_args(const char *name, unsigned nargs) {
+    if (!name || !g_dbRegHashReady) return NULL;
+    for (unsigned k = 0; k <= OSI_DB_MAX_OUT_PARAMS; k++) {
+        char key[104];
+        db_make_key(key, sizeof(key), name, nargs + k);
+        int32_t at = g_dbRegHash[db_hash_slot_in(g_dbRegHash, key, false)];
+        if (at != DBREG_EMPTY && g_dbReg[at].inArgs == nargs) return g_dbReg[at].def;
+    }
+    return NULL;
+}
+
+/* Total parameter count (in + out) and out-param count from a def's Signature:
+ * def+0x18 -> Signature; Signature+0x10 -> Params (List: Size @ +0x10);
+ * Signature+0x18 -> OutParamList { uint8_t *Params; uint32_t Count } where
+ * Count is bitmap *bytes* and the out-param count is the popcount over them
+ * (upstream FuncSigOutParamList::numOutParams). Returns false when the chain
+ * cannot be read. */
+bool osi_def_read_arity(void *def, unsigned *outArity, unsigned *outOutParams) {
+    if (!def) return false;
+    void *sig = NULL;
+    if (!safe_memory_read_pointer((mach_vm_address_t)def + OSIFUNCDEF_SIGNATURE_OFFSET, &sig) || !sig) return false;
+    unsigned size = 0;
+    if (!osi_sig_read_param_count(sig, &size)) return false;
+
+    /* Signature+0x18 is a COsiBitVector { uint8_t *bits; uint32_t byteCount }
+     * with byteCount = (nbits >> 3) + 1 (COsiBitVector::COsiBitVector(uint8_t));
+     * the out-param count is the popcount over those bytes, exactly upstream's
+     * FuncSigOutParamList::numOutParams. */
+    unsigned outCount = 0;
+    void *bitmap = NULL;
+    uint32_t bytes = 0;
+    if (safe_memory_read_pointer((mach_vm_address_t)sig + FUNCSIG_OUTPARAMLIST_OFFSET, &bitmap) && bitmap &&
+        safe_memory_read_u32((mach_vm_address_t)sig + FUNCSIG_OUTPARAMCOUNT_OFFSET, &bytes) &&
+        bytes <= (PARAMLIST_MAX_PARAMS >> 3) + 1) {
+        for (uint32_t i = 0; i < bytes; i++) {
+            uint8_t b = 0;
+            if (!safe_memory_read_u8((mach_vm_address_t)bitmap + i, &b)) { outCount = 0; break; }
+            outCount += (unsigned)__builtin_popcount(b);
+        }
+    }
+    if (outCount > size) outCount = size;
+    if (outArity) *outArity = size;
+    if (outOutParams) *outOutParams = outCount;
+    return true;
 }
 
 int osi_db_count(void) { return g_dbRegCount; }
@@ -923,7 +1119,12 @@ void osi_func_enumerate_by_name(void) {
                  * entirely zero, so there is no handle to dispatch by and the
                  * def (and its Rete node) is the only route to them. */
                 const char *defName = extract_func_name_from_def(def);
-                if (osi_db_register(defName, def)) {
+                unsigned arity = 0, outParams = 0;
+                if (!osi_def_read_arity(def, &arity, &outParams)) {
+                    arity = 0;
+                    outParams = 0;
+                }
+                if (osi_db_register_arity(defName, arity, arity - outParams, def)) {
                     found++;
                 }
 
@@ -1062,6 +1263,31 @@ bool osi_func_refresh_if_stale(void) {
     return gained > 0;
 }
 
+/* A new story is a new set of functions, so the lifetime attempt budget has to
+ * start over with it: after a dozen refreshes in the first session, every later
+ * session's lookup miss was permanent (upstream rebuilds its name cache from
+ * scratch at each StoryLoaded). Called from the game-state hook next to
+ * osi_db_invalidate. */
+void osi_func_refresh_reset(void) {
+    s_lastRefreshMs = 0;
+    s_refreshCount = 0;
+}
+
+/* Case-insensitive engine-cache lookup: the canonical spelling of `name`, or
+ * NULL if no function matches ignoring case (or the match is exact, which is
+ * not a case problem). Upstream keeps a lowercase "legacy name" index for the
+ * same purpose (LuaNameResolver.inl). Linear because it is only reached on a
+ * miss, after the fast paths have failed. */
+const char *osi_func_lookup_name_ci(const char *name) {
+    if (!name || !*name) return NULL;
+    for (int i = 0; i < g_funcCacheCount; i++) {
+        if (strcasecmp(g_funcCache[i].name, name) == 0) {
+            return (strcmp(g_funcCache[i].name, name) == 0) ? NULL : g_funcCache[i].name;
+        }
+    }
+    return NULL;
+}
+
 uint32_t osi_func_lookup_id(const char *name) {
     if (!name) return INVALID_FUNCTION_ID;
 
@@ -1124,6 +1350,29 @@ int osi_func_get_info(const char *name, uint8_t *out_arity, uint8_t *out_type) {
     }
 
     return 0;
+}
+
+int osi_func_lookup_overloads(const char *name, const CachedFunction **out, int max) {
+    if (!name || !out || max <= 0) return 0;
+    int n = 0;
+
+    // Fast path: the name owns its hash slot -- walk the overload chain.
+    int hash = func_name_hash(name);
+    int32_t idx = g_funcNameHashTable[hash];
+    if (idx >= 0 && strcmp(g_funcCache[idx].name, name) == 0) {
+        for (int32_t i = idx; i >= 0 && n < max; i = g_funcCache[i].nextOverload) {
+            out[n++] = &g_funcCache[i];
+        }
+        return n;
+    }
+
+    // Slow path (hash collision): the entries are not chained, collect them all.
+    for (int i = 0; i < g_funcCacheCount && n < max; i++) {
+        if (strcmp(g_funcCache[i].name, name) == 0) {
+            out[n++] = &g_funcCache[i];
+        }
+    }
+    return n;
 }
 
 uint32_t osi_func_get_handle(const char *name) {
@@ -1297,6 +1546,46 @@ void osi_func_probe_info(const char *name, void (*out)(const char *fmt, ...)) {
     out("  type: %s[%d]", osi_func_type_str(cachedType), cachedType);
     out("  handle: 0x%08x", handle);
 
+    /* Every cached overload -- Osi.<name>(args) picks among these by input count. */
+    {
+        const CachedFunction *ov[OSI_MAX_OVERLOADS];
+        int n = osi_func_lookup_overloads(name, ov, OSI_MAX_OVERLOADS);
+        out("  overloads (engine id cache): %d", n);
+        for (int i = 0; i < n; i++) {
+            out("    [%d] funcId=0x%08x arity=%d type=%s[%d] handle=0x%08x", i, ov[i]->id,
+                ov[i]->arity, osi_func_type_str(ov[i]->type), ov[i]->type, ov[i]->handle);
+        }
+    }
+
+    /* Arities the STORY name index declares for this name.
+     *
+     * This is the list upstream resolves against -- its name cache is built
+     * from the story's function table, so it sees every declared arity. Ours is
+     * built by enumerating engine ids and can see fewer: the shipped story calls
+     * `MakePlayer(char, player)` and CustomCompanions calls `MakePlayer(char)`,
+     * while the id cache knows only a 3-input MakePlayer. Where the two columns
+     * disagree, dispatch is resolving against incomplete information. */
+    {
+        int found = 0;
+        for (unsigned a = 0; a <= 8; a++) {
+            void *def = osi_db_lookup_arity(name, a);
+            if (!def) continue;
+            if (!found) out("  story name index (what upstream resolves against):");
+            found++;
+            unsigned tot = 0, outs = 0;
+            bool ok = osi_def_read_arity(def, &tot, &outs);
+            uint32_t h = osi_func_handle_from_def(def);
+            uint8_t ftype = 0;
+            safe_memory_read_u8((mach_vm_address_t)def + 0x24, &ftype);
+            out("    /%u def=%p handle=0x%08x type=%s[%d] %s(in=%u out=%u)", a, def, h,
+                osi_func_type_str(ftype), ftype, ok ? "" : "arity unreadable ",
+                ok ? tot - outs : 0, ok ? outs : 0);
+        }
+        if (!found) {
+            out("  story name index: (none -- not a story symbol, or index not walked)");
+        }
+    }
+
     /* 2. Re-probe the pointer chain from live memory */
     if (funcId == INVALID_FUNCTION_ID) {
         out("  [Cannot probe pointer chain - funcId unknown]");
@@ -1358,10 +1647,11 @@ void osi_func_probe_info(const char *name, void (*out)(const char *fmt, ...)) {
         return;
     }
 
-    /* Step 4: Size at ParamList+0x10 */
-    uint32_t paramSize = 0;
-    if (safe_memory_read_u32((mach_vm_address_t)paramListPtr + PARAMLIST_SIZE_OFFSET, &paramSize)) {
-        out("  ParamList.Size: %u (at PL+0x%x) <- THIS IS ARITY", paramSize, PARAMLIST_SIZE_OFFSET);
+    /* Step 4: size at ParamList+0x18 (u64, after the embedded sentinel) */
+    uint64_t paramSize = 0;
+    if (safe_memory_read((mach_vm_address_t)paramListPtr + PARAMLIST_SIZE_OFFSET, &paramSize, sizeof(paramSize))) {
+        out("  ParamList.Size: %llu (at PL+0x%x) <- THIS IS ARITY (in+out)",
+            (unsigned long long)paramSize, PARAMLIST_SIZE_OFFSET);
     } else {
         out("  ParamList.Size: FAILED to read at PL+0x%x", PARAMLIST_SIZE_OFFSET);
     }

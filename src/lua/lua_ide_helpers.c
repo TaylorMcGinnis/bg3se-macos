@@ -175,10 +175,12 @@ static void emit_ext_namespace(luaL_Buffer *buf) {
     luaL_addstring(buf, "\n");
 
     luaL_addstring(buf, "---@class Ext_Osiris\n");
-    luaL_addstring(buf, "---@field RegisterListener fun(name: string, arity: integer, event: string, callback: function) Register Osiris listener\n");
-    luaL_addstring(buf, "---@field NewCall fun(name: string, params: string) Create custom Osiris call\n");
-    luaL_addstring(buf, "---@field NewQuery fun(name: string, params: string) Create custom Osiris query\n");
-    luaL_addstring(buf, "---@field NewEvent fun(name: string, params: string) Create custom Osiris event\n");
+    luaL_addstring(buf, "---@field RegisterListener fun(name: string, arity: integer, event: string, callback: function): integer Register Osiris listener, returns subscription id\n");
+    luaL_addstring(buf, "---@field UnregisterListener fun(id: integer): boolean Remove a subscription made by RegisterListener\n");
+    luaL_addstring(buf, "---@field NewCall fun(name: string, params: string, handler: function) Create custom Osiris call (macOS port only)\n");
+    luaL_addstring(buf, "---@field NewQuery fun(name: string, params: string, handler: function) Create custom Osiris query (macOS port only)\n");
+    luaL_addstring(buf, "---@field NewEvent fun(name: string, params: string) Create custom Osiris event (macOS port only)\n");
+    luaL_addstring(buf, "---@field RaiseEvent fun(name: string, ...) Raise a custom Osiris event (macOS port only)\n");
     luaL_addstring(buf, "\n");
 
     luaL_addstring(buf, "---@class Ext_Events\n");

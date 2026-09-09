@@ -18,6 +18,8 @@ extern "C" {
 // Constants
 // ============================================================================
 
+// Initial listener-table capacity. The table grows on demand (upstream's
+// OsirisCallbackManager has no cap); this is only the first allocation.
 #define MAX_OSIRIS_LISTENERS 512
 
 // ============================================================================
@@ -30,8 +32,8 @@ extern "C" {
 typedef struct {
     char event_name[128];    // Osiris event name to listen for
     int arity;               // Number of arguments the callback expects
-    char timing[16];         // "before" or "after"
-    int callback_ref;        // Lua registry reference to callback function
+    char timing[16];         // "before", "after", "beforeDelete" or "afterDelete"
+    int callback_ref;        // Lua registry reference; LUA_NOREF once unregistered
 } OsirisListener;
 
 // ============================================================================
@@ -39,10 +41,17 @@ typedef struct {
 // ============================================================================
 
 /**
- * Ext.Osiris.RegisterListener(event, arity, timing, callback)
- * Registers a callback for an Osiris event.
+ * Ext.Osiris.RegisterListener(event, arity, timing, callback) -> id
+ * Registers a callback for an Osiris event. Returns the subscription id.
  */
 int lua_ext_osiris_registerlistener(lua_State *L);
+
+/**
+ * Ext.Osiris.UnregisterListener(id) -> boolean
+ * Removes a subscription made by RegisterListener; false if the id is not a
+ * live subscription (upstream OsirisCallbackManager::Unsubscribe).
+ */
+int lua_ext_osiris_unregisterlistener(lua_State *L);
 
 /**
  * Ext.Osiris.NewCall(name, signature, handler)
@@ -85,14 +94,26 @@ int lua_osiris_get_listener_count(void);
 
 /**
  * Get a listener by index.
- * @return Pointer to listener, or NULL if index out of range
+ * @return Pointer to listener, or NULL if index out of range or the
+ *         subscription was unregistered. The pointer is only valid until the
+ *         next RegisterListener (the table may be reallocated), so copy what
+ *         you need before calling back into Lua.
  */
 OsirisListener *lua_osiris_get_listener(int index);
 
 /**
- * Reset all listeners (for cleanup).
+ * lua_pcall message handler that appends a Lua traceback to the error
+ * (upstream CallWithTraceback). Push with lua_pushcfunction and pass its
+ * stack index as the msgh argument.
  */
-void lua_osiris_reset_listeners(void);
+int lua_osiris_traceback_msgh(lua_State *L);
+
+/**
+ * Reset all listeners (for cleanup), releasing their registry references.
+ * @param L Lua state that owns the callback references (may be NULL if the
+ *          state is already closed)
+ */
+void lua_osiris_reset_listeners(lua_State *L);
 
 /**
  * Reset all custom functions (for session cleanup).

@@ -114,10 +114,16 @@ static int g_TypeIdRetryCount = 0;
 // Re-derived 2026-07-28 via nm for game build 4.1.1.7209685 (was 0x10898c968)
 #define OFFSET_EOCCLIENT_SINGLETON_PTR 0x108994968
 
-// Offset of EntityWorld* within EoCClient struct
-// Windows BG3SE: EntityWorld at +0x1D0, PermissionsManager at +0x1D8
-// Previous 0x1B0 was wrong (overlapped with Array fields before PermissionsManager)
+// Offset of EntityWorld* within EoCClient struct.
+// Upstream GameState.h puts it at +0x1B0 (after BusyMessage/InitializationState/
+// AutoPlayRequestState/field_1AC); the Windows build this port was first
+// audited against had it at +0x1D0. The arm64 7398727 layout is 0x10 shorter:
+// probed live 2026-09-07, EoCClient+0x1D0 is NULL and +0x1A0 holds a world
+// whose +0x2d0 storage container / +0x3f0 cache / +0x28 static match the
+// server world exactly. entity_discover_client_world therefore tries every
+// known slot and keeps the first that passes looks_like_entity_world.
 #define OFFSET_ENTITYWORLD_IN_EOCCLIENT 0x1D0
+static const uint32_t k_EntityWorldInEocClientCandidates[] = { 0x1A0, 0x1B0, OFFSET_ENTITYWORLD_IN_EOCCLIENT };
 
 // Verified for 4.1.1.7209685 in
 // ghidra/offsets/COMPONENT_OPS_AND_PROTO_INIT.md, Dig 1; re-verified for
@@ -276,6 +282,30 @@ static bool is_valid_pointer(void *ptr) {
                                               (mach_vm_address_t)&probe,
                                               &got);
     return kr == KERN_SUCCESS && got == sizeof(probe);
+}
+
+// Helper: Does `world` have the EntityWorld shape this port depends on?
+// An EntityWorld owns an EntityStorageContainer at +0x2d0 (whose first field
+// is the Entities array buffer) and an ImmediateWorldCache at +0x3f0. A wrong
+// EoCClient slot that happens to hold a heap pointer fails at least one of
+// those three dereferences; the server world (known good) passes all three.
+static bool looks_like_entity_world(void *world) {
+    if (!is_valid_pointer(world)) return false;
+
+    void *storage = NULL, *cache = NULL, *entities = NULL;
+    if (!safe_memory_read((mach_vm_address_t)((uintptr_t)world + ENTITYWORLD_STORAGE_OFFSET),
+                          &storage, sizeof(storage)) || !is_valid_pointer(storage)) {
+        return false;
+    }
+    if (!safe_memory_read((mach_vm_address_t)((uintptr_t)world + ENTITYWORLD_CACHE_OFFSET),
+                          &cache, sizeof(cache)) || !is_valid_pointer(cache)) {
+        return false;
+    }
+    if (!safe_memory_read((mach_vm_address_t)((uintptr_t)storage + STORAGE_CONTAINER_ENTITIES_OFFSET),
+                          &entities, sizeof(entities)) || !is_valid_pointer(entities)) {
+        return false;
+    }
+    return true;
 }
 
 // Helper: Get the main binary's __DATA segment bounds
@@ -556,42 +586,29 @@ static void *read_eocclient_from_global(void) {
         return NULL;
     }
 
-    // Check if we have a valid address (not placeholder)
-    if (OFFSET_EOCCLIENT_SINGLETON_PTR == 0) {
-        // Try runtime-discovered address if set via Lua
-        extern uintptr_t g_RuntimeClientSingletonAddr;  // Set via Ext.Entity.SetClientSingleton()
-        if (g_RuntimeClientSingletonAddr == 0) {
-            LOG_ENTITY_DEBUG("EoCClient singleton address not discovered - use Ext.Entity.SetClientSingleton()");
-            return NULL;
-        }
-        // Use runtime-discovered address directly (already adjusted)
-        uintptr_t global_addr = g_RuntimeClientSingletonAddr;
-
-        vm_size_t data_size = sizeof(void*);
-        vm_offset_t data;
-        kern_return_t kr = vm_read(mach_task_self(), (vm_address_t)global_addr,
-                                   data_size, &data, (mach_msg_type_number_t*)&data_size);
-
-        if (kr != KERN_SUCCESS) {
-            LOG_ENTITY_DEBUG("Failed to read EoCClient from runtime address 0x%llx",
-                       (unsigned long long)global_addr);
-            return NULL;
-        }
-
-        void *eocclient = *(void **)data;
-        vm_deallocate(mach_task_self(), data, data_size);
-
-        if (eocclient && is_valid_pointer(eocclient)) {
-            LOG_ENTITY_DEBUG("Read EoCClient pointer from runtime address: %p", eocclient);
-            return eocclient;
-        }
+    // Resolve ecl::EocClient::m_ptr the same way read_eocserver_from_global
+    // resolves the server slot: a Lua override (Ext.Entity.SetClientSingleton)
+    // wins, then the per-version offset table, then the hardcoded define --
+    // but only when the binary is the exact build that define was audited
+    // against. Reading a stale slot on any other build yields NULL (or a
+    // garbage EoCClient); on 7398727 it read NULL every launch, so the client
+    // world, client entity events and Ext.Entity.GetClientComponent were all
+    // silently unavailable even though the table already carried the slot.
+    extern uintptr_t g_RuntimeClientSingletonAddr;
+    uintptr_t actual_base = (uintptr_t)g_MainBinaryBase;
+    uintptr_t global_addr;
+    const VersionOffsets *off = offset_table_get();
+    if (g_RuntimeClientSingletonAddr) {
+        global_addr = g_RuntimeClientSingletonAddr;  // already a runtime address
+    } else if (off && off->eocclient_ptr) {
+        global_addr = actual_base + off->eocclient_ptr;
+    } else if (version_detect_matches()) {
+        global_addr = OFFSET_EOCCLIENT_SINGLETON_PTR - GHIDRA_BASE_ADDRESS + actual_base;
+    } else {
+        LOG_ENTITY_DEBUG("No verified EocClient slot for this game version - "
+                         "client world discovery disabled (fail closed)");
         return NULL;
     }
-
-    // Calculate runtime address of ecl::EocClient::m_ptr
-    uintptr_t ghidra_base = GHIDRA_BASE_ADDRESS;
-    uintptr_t actual_base = (uintptr_t)g_MainBinaryBase;
-    uintptr_t global_addr = OFFSET_EOCCLIENT_SINGLETON_PTR - ghidra_base + actual_base;
 
     LOG_ENTITY_DEBUG("Reading EoCClient from global at 0x%llx", (unsigned long long)global_addr);
 
@@ -719,24 +736,30 @@ bool entity_discover_client_world(void) {
 
     g_EoCClient = eocclient;
 
-    // Read EntityWorld from estimated offset
-    void *entityworld = *(void **)((char *)eocclient + OFFSET_ENTITYWORLD_IN_EOCCLIENT);
-
-    if (entityworld && is_valid_pointer(entityworld)) {
+    // The EntityWorld slot moved between builds (see the candidate table);
+    // take the first slot holding something shaped like an EntityWorld.
+    for (size_t i = 0; i < sizeof(k_EntityWorldInEocClientCandidates) / sizeof(k_EntityWorldInEocClientCandidates[0]); i++) {
+        uint32_t off = k_EntityWorldInEocClientCandidates[i];
+        void *entityworld = NULL;
+        if (!safe_memory_read((mach_vm_address_t)((uintptr_t)eocclient + off),
+                              &entityworld, sizeof(entityworld))) {
+            continue;
+        }
+        if (!looks_like_entity_world(entityworld)) {
+            LOG_ENTITY_DEBUG("EoCClient+0x%x = %p does not look like an EntityWorld", off, entityworld);
+            continue;
+        }
         g_ClientEntityWorld = entityworld;
-        LOG_ENTITY_DEBUG("SUCCESS: Discovered EoCClient=%p, ClientEntityWorld=%p",
-                   g_EoCClient, g_ClientEntityWorld);
+        LOG_ENTITY_DEBUG("SUCCESS: Discovered EoCClient=%p, ClientEntityWorld=%p (EoCClient+0x%x)",
+                   g_EoCClient, g_ClientEntityWorld, off);
 
         // Bind entity events to client world
         entity_events_bind(g_ClientEntityWorld, false);
 
         return true;
-    } else {
-        LOG_ENTITY_DEBUG("Found EoCClient but EntityWorld at +0x%x is NULL or invalid",
-                   OFFSET_ENTITYWORLD_IN_EOCCLIENT);
-        LOG_ENTITY_DEBUG("(Client may need different offset - try probing)");
     }
 
+    LOG_ENTITY_DEBUG("Found EoCClient %p but no candidate slot holds an EntityWorld", eocclient);
     return false;
 }
 
@@ -861,10 +884,24 @@ EntityHandle entity_get_by_guid(const char *guid_str) {
     // This handles character entity GUIDs that have prefixes
     const char *uuid_str = extract_uuid_from_guid(guid_str);
 
-    // Check cache first (use original guid_str for exact match)
+    /* Check the memo first -- but only trust an entry whose handle the engine
+     * still knows. Loading a savegame mid-session rebuilds every entity with a
+     * new handle while the GUID stays the same, so an unvalidated memo hands
+     * back a dead handle for the rest of the process: Ext.Entity.Get(uuid)
+     * returns an entity object with ZERO components and every property reads
+     * nil. (Seen live 2026-09-07 23:16 -- Gale's memo said 0x200000100000093,
+     * the live entity was 0x20000080002df16.) */
     for (int i = 0; i < g_GuidCacheCount; i++) {
         if (strcmp(g_GuidCache[i].guid, guid_str) == 0) {
-            return g_GuidCache[i].handle;
+            if (entity_is_alive(g_GuidCache[i].handle)) {
+                return g_GuidCache[i].handle;
+            }
+            /* Stale: drop it (swap with the last entry) and re-resolve. */
+            LOG_ENTITY_DEBUG("GUID memo stale for %s (handle=0x%llx no longer live) — re-resolving",
+                             guid_str, (unsigned long long)g_GuidCache[i].handle);
+            g_GuidCache[i] = g_GuidCache[g_GuidCacheCount - 1];
+            g_GuidCacheCount--;
+            break;
         }
     }
 
@@ -907,6 +944,24 @@ EntityHandle entity_get_by_guid(const char *guid_str) {
     }
 
     return ENTITY_HANDLE_INVALID;
+}
+
+/*
+ * Drop everything that is only valid for the session that produced it.
+ *
+ * Loading a savegame rebuilds the entity set: the EntityWorld object survives,
+ * but every entity is recreated with a new handle and the engine's
+ * UuidToHandleMappingComponent is replaced. Both of the caches below are keyed
+ * on the old session and would otherwise be wrong for the rest of the process.
+ * The per-lookup liveness check in entity_get_by_guid covers handles that die
+ * mid-session; this covers the wholesale case in one step.
+ */
+void entity_session_invalidate(const char *why) {
+    if (g_GuidCacheCount == 0 && !g_UuidMappingComponent) return;
+    LOG_ENTITY_DEBUG("Entity session caches invalidated (%s): %d GUID entries, mapping=%p",
+                     why ? why : "?", g_GuidCacheCount, g_UuidMappingComponent);
+    g_GuidCacheCount = 0;
+    g_UuidMappingComponent = NULL;
 }
 
 /**
@@ -1254,16 +1309,53 @@ static int lua_entity_get(lua_State *L) {
         return 1;
     }
 
-    // Create entity userdata with lifetime scoping
+    lua_entity_push_handle(L, handle);
+    return 1;
+}
+
+void lua_entity_push_handle(lua_State *L, EntityHandle handle) {
+    if (handle == ENTITY_HANDLE_NULL || handle == ENTITY_HANDLE_INVALID) {
+        lua_pushnil(L);
+        return;
+    }
+
     EntityUserdata *ud = (EntityUserdata*)lua_newuserdata(L, sizeof(EntityUserdata));
     ud->handle = handle;
     ud->lifetime = LIFETIME_INFINITE_HANDLE;  // entities never expire (upstream parity)
 
-    // Set metatable
     luaL_getmetatable(L, "BG3Entity");
     lua_setmetatable(L, -2);
+}
 
-    return 1;
+bool lua_entity_to_handle(lua_State *L, int idx, EntityHandle *out) {
+    EntityUserdata *ud = (EntityUserdata *)luaL_testudata(L, idx, "BG3Entity");
+    if (ud) {
+        *out = ud->handle;
+        return true;
+    }
+    // Strings first: lua_isnumber() would coerce "0x2000001000000f9" through
+    // a double and round the low bits (GetByHandle(str) resolved to the
+    // wrong entity before this ordering).
+    if (lua_type(L, idx) == LUA_TSTRING) {
+        // "0x3fdbcca5bd6aeec7" (or bare hex): the form reads used to surface
+        // and serialized tables still carry.
+        const char *str = lua_tostring(L, idx);
+        char *end = NULL;
+        const char *digits = (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) ? str + 2 : str;
+        uint64_t value = strtoull(digits, &end, 16);
+        if (end == digits || *end != '\0') return false;
+        *out = (EntityHandle)value;
+        return true;
+    }
+    if (lua_isinteger(L, idx)) {
+        *out = (EntityHandle)lua_tointeger(L, idx);
+        return true;
+    }
+    if (lua_isnumber(L, idx)) {
+        *out = (EntityHandle)lua_tonumber(L, idx);
+        return true;
+    }
+    return false;
 }
 
 // Ext.Entity.GetWorld() -> true/false (for debugging)
@@ -1286,22 +1378,10 @@ static int lua_entity_get_by_handle(lua_State *L) {
         return 2;
     }
 
-    // Accept either integer or hex string for handle
+    // Accept an entity proxy, an integer, or a hex string for the handle
     EntityHandle handle;
-    if (lua_isinteger(L, 1)) {
-        handle = (EntityHandle)lua_tointeger(L, 1);
-    } else if (lua_isnumber(L, 1)) {
-        handle = (EntityHandle)lua_tonumber(L, 1);
-    } else if (lua_isstring(L, 1)) {
-        // Parse hex string like "0x3fdbcca5bd6aeec7"
-        const char *str = lua_tostring(L, 1);
-        if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
-            handle = (EntityHandle)strtoull(str + 2, NULL, 16);
-        } else {
-            handle = (EntityHandle)strtoull(str, NULL, 16);
-        }
-    } else {
-        return luaL_error(L, "GetByHandle: expected number or hex string");
+    if (!lua_entity_to_handle(L, 1, &handle)) {
+        return luaL_error(L, "GetByHandle: expected entity, number or hex string");
     }
 
     if (!entity_is_valid(handle)) {
@@ -1309,15 +1389,7 @@ static int lua_entity_get_by_handle(lua_State *L) {
         return 1;
     }
 
-    // Create entity userdata with lifetime scoping
-    EntityUserdata *ud = (EntityUserdata*)lua_newuserdata(L, sizeof(EntityUserdata));
-    ud->handle = handle;
-    ud->lifetime = LIFETIME_INFINITE_HANDLE;  // entities never expire (upstream parity)
-
-    // Set metatable
-    luaL_getmetatable(L, "BG3Entity");
-    lua_setmetatable(L, -2);
-
+    lua_entity_push_handle(L, handle);
     return 1;
 }
 
@@ -2349,8 +2421,17 @@ static int lua_entity_get_all_components(lua_State *L) {
         );
 
         if (component) {
-            // Use name or fallback
-            if (name) {
+            // Upstream keys this table by ExtComponentType (meta.Type in
+            // EntityProxyMetatable::GetAllComponents), i.e. the Lua-facing
+            // name -- "ServerRaceTag", not "esv::tags::RaceTagComponent".
+            // GetAllComponentNames, by contrast, returns engine class names.
+            // BG3SX reads GetAllComponents().ServerRaceTag.Tags and MCM's
+            // debug dump iterates by these keys. Fall back to the class name
+            // for engine components upstream has no mapping for.
+            const char *upstreamName = name ? component_class_to_upstream_name(name) : NULL;
+            if (upstreamName) {
+                lua_pushstring(L, upstreamName);
+            } else if (name) {
                 lua_pushstring(L, name);
             } else {
                 char buf[32];
@@ -2662,6 +2743,17 @@ static int lua_entity_tostring(lua_State *L) {
         snprintf(buf, sizeof(buf), "Entity(0x%llx) [EXPIRED]", (unsigned long long)ud->handle);
     }
     lua_pushstring(L, buf);
+    return 1;
+}
+
+// Entity metatable __eq: upstream entity proxies are light C++ objects that
+// compare by handle, so `status.Owner == entity` holds across separate reads.
+// Each read here creates a fresh userdata, which would otherwise never be
+// equal to another proxy of the same entity.
+static int lua_entity_eq(lua_State *L) {
+    EntityUserdata *a = (EntityUserdata *)luaL_testudata(L, 1, "BG3Entity");
+    EntityUserdata *b = (EntityUserdata *)luaL_testudata(L, 2, "BG3Entity");
+    lua_pushboolean(L, a && b && a->handle == b->handle);
     return 1;
 }
 
@@ -3561,8 +3653,10 @@ static int lua_entity_get_client_component(lua_State *L) {
                                                          info->is_proxy);
     if (!component) {
         lua_pushnil(L);
-        lua_pushfstring(L, "client entity 0x%llx has no %s",
-                        (unsigned long long)handle, layout->componentName);
+        char msg[160];
+        snprintf(msg, sizeof(msg), "client entity 0x%llx has no %s",
+                 (unsigned long long)handle, layout->componentName);
+        lua_pushstring(L, msg);
         return 2;
     }
     component_property_push_proxy(L, component, layout);
@@ -3719,6 +3813,9 @@ void entity_register_lua(lua_State *L) {
 
     lua_pushcfunction(L, lua_entity_tostring);
     lua_setfield(L, -2, "__tostring");
+
+    lua_pushcfunction(L, lua_entity_eq);
+    lua_setfield(L, -2, "__eq");
 
     lua_pop(L, 1);  // pop metatable
 

@@ -221,6 +221,15 @@ EntityHandle entity_get_by_guid(const char *guid_str);
 bool entity_is_alive(EntityHandle handle);
 
 /**
+ * Drop caches that only hold for the current session (the GUID -> handle memo
+ * and the UuidToHandleMappingComponent singleton). Call on the session/story
+ * transitions that rebuild the entity set; loading a savegame gives every
+ * entity a new handle while its GUID stays the same.
+ * @param why Short reason, for the log.
+ */
+void entity_session_invalidate(const char *why);
+
+/**
  * True if a game function pointer is a compiled-out std::terminate stub.
  *
  * macOS ships many template specializations whose body is only:
@@ -327,6 +336,26 @@ struct lua_State;
  * Register Ext.Entity API with Lua state.
  */
 void entity_register_lua(struct lua_State *L);
+
+/**
+ * Push an EntityHandle the way upstream lua::push(EntityHandle) does: an
+ * entity proxy (the same userdata Ext.Entity.Get returns), or nil for the
+ * null handle. Component fields, array elements and map keys of type
+ * EntityHandle all go through here so mods can chain
+ * entity.InventoryOwner.PrimaryInventory.InventoryContainer as on Windows.
+ * Liveness is not checked (upstream parity): a stale handle still proxies.
+ */
+void lua_entity_push_handle(struct lua_State *L, EntityHandle handle);
+
+/**
+ * Read an EntityHandle argument: an entity proxy, an integer, or the
+ * "0x..." string form older serialized tables carry. Returns false when the
+ * value is none of those.
+ */
+bool lua_entity_to_handle(struct lua_State *L, int idx, EntityHandle *out);
+
+// ls::EntityHandle::NullHandle — what the engine stores for "no entity".
+#define ENTITY_HANDLE_NULL 0xFFC0000000000000ULL
 
 #ifdef __cplusplus
 }

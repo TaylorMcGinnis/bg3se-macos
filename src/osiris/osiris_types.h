@@ -120,6 +120,10 @@ typedef struct {
     uint8_t type;  // OsiFunctionType
     uint32_t id;
     uint32_t handle;  // Encoded OsirisFunctionHandle (0 = not yet computed)
+    // Osiris overloads by arity: MakePlayer/1, /2 and /3 are three functions
+    // with three ids sharing one name. Same-name entries chain through this
+    // index (-1 = end) so a lookup can see every overload, not just the first.
+    int32_t nextOverload;
 } CachedFunction;
 
 // ============================================================================
