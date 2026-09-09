@@ -2,7 +2,7 @@
 
 All notable changes to BG3SE-macOS are documented here.
 
-## Unreleased
+## v0.47.3 (2026-09-09)
 
 - **`Ext.Entity.Get(uuid)` returned a dead handle after loading a save.**
   The GUID → handle memo (`entity_system.c`) and the cached
