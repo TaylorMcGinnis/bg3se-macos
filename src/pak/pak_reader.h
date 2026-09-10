@@ -8,6 +8,7 @@
 #ifndef BG3SE_PAK_READER_H
 #define BG3SE_PAK_READER_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
 
@@ -64,6 +65,13 @@ typedef struct {
  * @param path Path to the .pak file
  * @return PakFile handle, or NULL on failure
  */
+/**
+ * True if the file is a dataless iCloud stub. Reading one blocks in the kernel
+ * until the sync daemon delivers it, which during dylib init hangs the whole
+ * game; stat() itself does not trigger a download, so this is safe to call.
+ */
+bool pak_is_dataless(const char *path);
+
 PakFile *pak_open(const char *path);
 
 /**

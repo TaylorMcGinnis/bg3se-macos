@@ -6,18 +6,49 @@
 
 #include "pak_reader.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <zlib.h>
 #include "lz4/lz4.h"
+#include "../core/logging.h"
 
 // ============================================================================
 // Core API Implementation
 // ============================================================================
 
+/* macOS evicts files to iCloud when the boot volume runs low ("Optimize Mac
+ * Storage"), leaving a dataless stub. Reading one blocks in the kernel until
+ * iCloud delivers it -- indefinitely if the sync daemon is wedged. bg3se reads
+ * every mod pak from bg3se_init, i.e. during dylib initialization, so a single
+ * evicted pak hangs the whole game before it draws a frame, with nothing in the
+ * log to explain it. That is exactly what happened on 2026-09-09 after debug
+ * logs filled the disk (see docs/CHANGELOG.md).
+ *
+ * stat() does NOT trigger a materialization, so checking the flag first is
+ * safe. Skip the pak with a loud, actionable message instead of hanging: the
+ * mod will not be detected, but the game starts and the user is told why. */
+#ifndef SF_DATALESS
+#define SF_DATALESS 0x40000000
+#endif
+
+bool pak_is_dataless(const char *path) {
+    struct stat st;
+    if (!path || stat(path, &st) != 0) return false;
+    return (st.st_flags & SF_DATALESS) != 0;
+}
+
 PakFile *pak_open(const char *path) {
+    if (pak_is_dataless(path)) {
+        log_message("[WARN] [Pak] %s is not on disk -- macOS evicted it to iCloud. "
+                    "Skipping it so startup is not blocked; the mod will not load. "
+                    "Restore it with: cat \"%s\" > /dev/null",
+                    path, path);
+        return NULL;
+    }
+
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;
 

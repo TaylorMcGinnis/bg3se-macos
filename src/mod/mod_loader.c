@@ -381,6 +381,17 @@ void mod_detect_enabled(void) {
              "%s/Documents/Larian Studios/Baldur's Gate 3/PlayerProfiles/Public/modsettings.lsx",
              home);
 
+    /* Same iCloud-eviction trap as the mod paks: this runs during dylib init,
+     * and reading a dataless stub blocks the game before it starts, with
+     * nothing logged. Fail loudly instead -- no mods will be detected, but the
+     * game runs and says why. */
+    if (pak_is_dataless(path)) {
+        LOG_MOD_ERROR("modsettings.lsx is not on disk -- macOS evicted it to iCloud. "
+                      "No mods will be detected. Restore it with: cat \"%s\" > /dev/null",
+                      path);
+        return;
+    }
+
     FILE *f = fopen(path, "r");
     if (!f) {
         LOG_MOD_ERROR("Could not open modsettings.lsx at: %s", path);

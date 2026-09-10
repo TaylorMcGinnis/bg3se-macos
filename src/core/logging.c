@@ -99,7 +99,18 @@ typedef struct {
 } LogConfig;
 
 static LogConfig g_config = {
-    .global_level = LOG_LEVEL_DEBUG,  // DEBUG enabled by default during development
+    /* INFO, not DEBUG.
+     *
+     * DEBUG writes several lines per Osiris call, per entity lookup and per
+     * frame. On a large mod profile that is gigabytes per session: one machine
+     * accumulated 168 GB across 329 logs (largest single file 37.9 GB) and ran
+     * its boot volume down to 11 GB free, at which point the game took minutes
+     * to start. Debugging a specific subsystem is what BG3SE_LOG_LEVEL=DEBUG
+     * and BG3SE_LOG_MODULES are for; shipping it by default is not viable.
+     *
+     * Set BG3SE_LOG_LEVEL=debug (optionally with BG3SE_LOG_MODULES=Osiris,Entity)
+     * to get the old behaviour for one run. */
+    .global_level = LOG_LEVEL_INFO,
     .output_flags = LOG_OUTPUT_FILE | LOG_OUTPUT_SYSLOG,
     .format = LOG_FORMAT_HUMAN,
     .color_enabled = true,

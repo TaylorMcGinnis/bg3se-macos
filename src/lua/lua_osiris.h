@@ -109,6 +109,15 @@ OsirisListener *lua_osiris_get_listener(int index);
 int lua_osiris_traceback_msgh(lua_State *L);
 
 /**
+ * Late node binding. Upstream's OsirisCallbackManager::Subscribe registers the
+ * node handler immediately when the story is already loaded, so a listener
+ * added after StoryLoaded still fires. main.c installs this; RegisterListener
+ * calls it. NULL until the Osiris side is up.
+ */
+typedef void (*OsirisNodeBindFn)(const char *name, int arity);
+void lua_osiris_set_node_binder(OsirisNodeBindFn fn);
+
+/**
  * Reset all listeners (for cleanup), releasing their registry references.
  * @param L Lua state that owns the callback references (may be NULL if the
  *          state is already closed)

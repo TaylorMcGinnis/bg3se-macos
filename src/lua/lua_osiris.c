@@ -43,6 +43,13 @@ static int check_osiris_context(const char *operation) {
 // Growable: upstream's OsirisCallbackManager has no subscription cap, and a
 // large mod profile registers well over the old fixed 512 (Wave 5 exhausted
 // 64; the 744-mod profile in bg3se-nominal-limits broke every fixed cap).
+/* Set by main.c: binds a late-registered listener to its RETE node, the way
+ * upstream's Subscribe() calls RegisterNodeHandler when the story is already
+ * loaded. Without it, a listener created after story load never fires. */
+static OsirisNodeBindFn g_node_binder = NULL;
+
+void lua_osiris_set_node_binder(OsirisNodeBindFn fn) { g_node_binder = fn; }
+
 static OsirisListener *osiris_listeners = NULL;
 static int osiris_listener_count = 0;
 static int osiris_listener_capacity = 0;
@@ -101,6 +108,11 @@ int lua_ext_osiris_registerlistener(lua_State *L) {
 
     LOG_LUA_DEBUG("Registered Osiris listener: %s (arity=%d, timing=%s)",
                 event, arity, timing);
+
+    /* Bind to the story node now if the story is already loaded (upstream
+     * Subscribe -> RegisterNodeHandler). Engine events are ignored by the
+     * binder and keep using the Event hook. */
+    if (g_node_binder) g_node_binder(event, arity);
 
     // Return the 1-based listener index as the subscription id (what
     // UnregisterListener takes), like upstream's SubscriptionId.

@@ -2,6 +2,37 @@
 
 All notable changes to BG3SE-macOS are documented here.
 
+## Unreleased
+
+- **Database and PROC listeners fire.** `Ext.Osiris.RegisterListener` on a
+  `DB_*`, `PROC_*` or `QRY_*` name registered successfully and then never fired,
+  because nothing hooked the RETE nodes. Ported from upstream's
+  `Osiris/Shared/NodeHooks.cpp`: the shared node vtables are patched once at
+  story load and `before`/`after`/`beforeDelete`/`afterDelete` dispatch through
+  them, with late registrations bound immediately the way upstream's
+  `Subscribe` does. On one live profile this bound **392 listeners across 74
+  nodes** that had all been silently dead. The wrapped slots are
+  `CReteStartNode::Add`/`::Del` (vptr +0x68/+0x70), not upstream's Windows slot
+  numbers -- see `ghidra/offsets/OSIRIS_RETE_VMT.md`.
+- **Database inserts go through the node entry point.** `Osi.DB_Foo(...)` called
+  `CReteDBase::insert` plus `ForwardAddToken` by hand, which bypassed the vtable
+  slot listeners hook, so an insert made from Lua notified nobody. Databases,
+  procs and events now share one path, exactly as upstream's `OsiInsert` calls
+  `InsertTuple` for all three. Verified: insert adds the row, delete removes it,
+  and the listener fires with the right argument.
+- **Debug logging no longer fills the disk.** The default log level was DEBUG,
+  which writes several lines per Osiris call: one machine accumulated **168 GB
+  across 329 files** (largest 37.9 GB) and ran its boot volume down to 11 GB
+  free. Default is now INFO; `BG3SE_LOG_LEVEL=debug` (optionally with
+  `BG3SE_LOG_MODULES=Osiris,Entity`) restores the old behaviour for a run.
+- **A cloud-evicted file no longer hangs the game.** When macOS "Optimize Mac
+  Storage" evicts `~/Documents` to iCloud, reading a dataless stub blocks in the
+  kernel until the sync daemon delivers it. `mod_detect_enabled` reads
+  `modsettings.lsx` and every mod pak during dylib init, so a single evicted file
+  froze the game before it drew a frame, with nothing in the log. Both reads now
+  check the dataless flag first (`stat` does not trigger a download) and skip
+  with an actionable message instead of hanging.
+
 ## v0.47.3 (2026-09-09)
 
 - **`Ext.Entity.Get(uuid)` returned a dead handle after loading a save.**

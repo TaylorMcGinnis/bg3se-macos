@@ -1990,6 +1990,248 @@ static int osi_db_tuple_matches(lua_State *L, mach_vm_address_t values,
  * which engine entry point we can legitimately call.
  *
  * This only reads and reports; it dispatches nothing. */
+/* ===========================================================================
+ * RETE node hooks: DB_* / PROC_* listeners
+ *
+ * Upstream binds each subscription to a node at StoryLoaded and patches the
+ * node VMTs (Osiris/Shared/NodeHooks.cpp); Database and Proc nodes wrap
+ * InsertTuple and DeleteTuple, which on this build are
+ * CReteStartNode::Add / ::Del at vptr +0x68 / +0x70 (see
+ * ghidra/offsets/OSIRIS_RETE_VMT.md). Those vtables live in libOsiris's
+ * read-only data and are shared by every node of a class, so they are patched
+ * once and survive story reloads; the per-story part is the node id -> name
+ * table, which is rebuilt on each walk.
+ *
+ * Without this, Ext.Osiris.RegisterListener on a database, PROC or QRY name
+ * registered successfully and never fired.
+ * ======================================================================== */
+typedef void (*OsiNodeTupleFn)(void *node, void *paramList);
+
+static int g_dbWalkDone;   /* defined with the database registry below */
+
+#define OSI_NODE_HOOK_MAX_VTABLES 8
+static struct {
+    void *vt;
+    OsiNodeTupleFn origAdd;
+    OsiNodeTupleFn origDel;
+} g_nodeHookVts[OSI_NODE_HOOK_MAX_VTABLES];
+static int g_nodeHookVtCount = 0;
+
+#define OSI_NODE_HOOK_MAX_NODES 512
+static struct {
+    uint32_t nodeId;
+    char name[128];
+} g_nodeHookNodes[OSI_NODE_HOOK_MAX_NODES];
+static int g_nodeHookNodeCount = 0;
+
+static const char *osi_node_hook_name(uint32_t nodeId) {
+    for (int i = 0; i < g_nodeHookNodeCount; i++) {
+        if (g_nodeHookNodes[i].nodeId == nodeId) return g_nodeHookNodes[i].name;
+    }
+    return NULL;
+}
+
+/* Push one Lua argument per entry of a COsipParameterList. Layout is the one
+ * read from CReteStartNode::Add: first node at list+0x10, next at node+0x08,
+ * item (a COsiParameter, same 16-byte shape as COsiTypedValue) at node+0x10;
+ * the walk ends when the node pointer is the sentinel address list+0x08. */
+static int osi_node_push_params(lua_State *L, void *paramList, int maxArgs) {
+    if (!paramList) return 0;
+    mach_vm_address_t sentinel = (mach_vm_address_t)paramList + 0x08;
+    void *cur = NULL;
+    if (!safe_memory_read_pointer((mach_vm_address_t)paramList + 0x10, &cur)) return 0;
+
+    int pushed = 0;
+    int guard = 0;
+    while (cur && (mach_vm_address_t)cur != sentinel && pushed < maxArgs && guard < 64) {
+        guard++;
+        void *item = NULL;
+        if (!safe_memory_read_pointer((mach_vm_address_t)cur + 0x10, &item) || !item) break;
+        osi_push_typed_value(L, (mach_vm_address_t)item);
+        pushed++;
+        void *next = NULL;
+        if (!safe_memory_read_pointer((mach_vm_address_t)cur + 0x08, &next)) break;
+        cur = next;
+    }
+    return pushed;
+}
+
+/* Fire every Lua listener registered for this symbol at this timing. Mirrors
+ * dispatch_event_to_lua: gate, copy the callback ref before calling (a handler
+ * may register another listener and reallocate the table), traceback handler,
+ * error-level logging. */
+static void osi_node_fire(const char *name, void *paramList, const char *timing) {
+    lua_State *L = lua_runtime_server()->L;
+    if (!L || !name) return;
+
+    lua_gate_lock();
+    L = lua_runtime_server()->L;
+    if (!L) { lua_gate_unlock(); return; }
+
+    int count = lua_osiris_get_listener_count();
+    for (int i = 0; i < count; i++) {
+        OsirisListener *listener = lua_osiris_get_listener(i);
+        if (!listener) continue;
+        if (strcmp(listener->event_name, name) != 0) continue;
+        if (strcmp(listener->timing, timing) != 0) continue;
+
+        int callback_ref = listener->callback_ref;
+        int wantArgs = listener->arity;
+
+        lua_pushcfunction(L, lua_osiris_traceback_msgh);
+        int msgh = lua_gettop(L);
+        lua_rawgeti(L, LUA_REGISTRYINDEX, callback_ref);
+        if (!lua_isfunction(L, -1)) { lua_pop(L, 2); continue; }
+
+        LifetimeHandle scope = lifetime_lua_begin_scope(L);
+        int pushed = osi_node_push_params(L, paramList, wantArgs);
+        if (lua_pcall(L, pushed, 0, msgh) != LUA_OK) {
+            LOG_OSIRIS_ERROR("Osiris event handler failed: %s", lua_tostring(L, -1));
+            lua_pop(L, 1);
+        }
+        lua_remove(L, msgh);
+        lifetime_lua_end_scope(L);
+        (void)scope;
+    }
+    lua_gate_unlock();
+}
+
+static OsiNodeTupleFn osi_node_orig(void *node, bool deleting) {
+    void *vt = NULL;
+    if (!node || !safe_memory_read_pointer((mach_vm_address_t)node, &vt) || !vt) return NULL;
+    for (int i = 0; i < g_nodeHookVtCount; i++) {
+        if (g_nodeHookVts[i].vt == vt) {
+            return deleting ? g_nodeHookVts[i].origDel : g_nodeHookVts[i].origAdd;
+        }
+    }
+    return NULL;
+}
+
+static void osi_node_hook_common(void *node, void *paramList, bool deleting) {
+    uint32_t nodeId = 0;
+    safe_memory_read_u32((mach_vm_address_t)node + 0x08, &nodeId);
+    const char *name = osi_node_hook_name(nodeId);
+
+    if (name) osi_node_fire(name, paramList, deleting ? "beforeDelete" : "before");
+
+    OsiNodeTupleFn orig = osi_node_orig(node, deleting);
+    if (orig) orig(node, paramList);
+
+    if (name) osi_node_fire(name, paramList, deleting ? "afterDelete" : "after");
+}
+
+static void osi_node_hook_add(void *node, void *paramList) {
+    osi_node_hook_common(node, paramList, false);
+}
+
+static void osi_node_hook_del(void *node, void *paramList) {
+    osi_node_hook_common(node, paramList, true);
+}
+
+/* Patch one class vtable's Add/Del slots, once. */
+static bool osi_node_hook_vtable(void *vt) {
+    if (!vt) return false;
+    for (int i = 0; i < g_nodeHookVtCount; i++) {
+        if (g_nodeHookVts[i].vt == vt) return true;   /* already patched */
+    }
+    if (g_nodeHookVtCount >= OSI_NODE_HOOK_MAX_VTABLES) return false;
+
+    void *origAdd = NULL, *origDel = NULL;
+    if (!safe_memory_read_pointer((mach_vm_address_t)vt + NODEVMT_INSERT_TUPLE, &origAdd) || !origAdd) return false;
+    if (!safe_memory_read_pointer((mach_vm_address_t)vt + NODEVMT_DELETE_TUPLE, &origDel) || !origDel) return false;
+
+    void *newAdd = (void *)osi_node_hook_add;
+    void *newDel = (void *)osi_node_hook_del;
+    /* safe_memory_write flips the page writable via mach_vm_protect and back. */
+    if (!safe_memory_write((mach_vm_address_t)vt + NODEVMT_INSERT_TUPLE, &newAdd, sizeof(newAdd)) ||
+        !safe_memory_write((mach_vm_address_t)vt + NODEVMT_DELETE_TUPLE, &newDel, sizeof(newDel))) {
+        LOG_OSIRIS_WARN("Node hooks: could not write vtable at %p (page stayed read-only)", vt);
+        return false;
+    }
+
+    g_nodeHookVts[g_nodeHookVtCount].vt = vt;
+    g_nodeHookVts[g_nodeHookVtCount].origAdd = (OsiNodeTupleFn)origAdd;
+    g_nodeHookVts[g_nodeHookVtCount].origDel = (OsiNodeTupleFn)origDel;
+    g_nodeHookVtCount++;
+    LOG_OSIRIS_INFO("Node hooks: patched vtable %p (Add=%p Del=%p)", vt, origAdd, origDel);
+    return true;
+}
+
+/* Bind one symbol: resolve name/arity -> def -> node, patch that node class's
+ * vtable, and remember nodeId -> name so the trampoline can find the listeners.
+ * Returns 1 bound, 0 not a story node, -1 a story symbol with no node. */
+static int osi_node_hooks_bind(const char *name, int arity) {
+    if (!name || !*name) return 0;
+
+    void *def = osi_db_lookup_args(name, (unsigned)(arity < 0 ? 0 : arity));
+    if (!def) def = osi_db_lookup(name);
+    if (!def) return 0;   /* engine event: dispatched by the Event hook instead */
+
+    void *node = NULL;
+    if (!osi_node_resolve(def, &node) || !node) return -1;
+
+    uint32_t nodeId = 0;
+    safe_memory_read_u32((mach_vm_address_t)node + 0x08, &nodeId);
+    if (nodeId == 0) return -1;
+
+    void *vt = NULL;
+    safe_memory_read_pointer((mach_vm_address_t)node, &vt);
+    if (!osi_node_hook_vtable(vt)) return -1;
+
+    for (int n = 0; n < g_nodeHookNodeCount; n++) {
+        if (g_nodeHookNodes[n].nodeId == nodeId) return 1;   /* already mapped */
+    }
+    if (g_nodeHookNodeCount >= OSI_NODE_HOOK_MAX_NODES) return -1;
+
+    g_nodeHookNodes[g_nodeHookNodeCount].nodeId = nodeId;
+    strncpy(g_nodeHookNodes[g_nodeHookNodeCount].name, name,
+            sizeof(g_nodeHookNodes[0].name) - 1);
+    g_nodeHookNodes[g_nodeHookNodeCount].name[sizeof(g_nodeHookNodes[0].name) - 1] = '\0';
+    g_nodeHookNodeCount++;
+    return 1;
+}
+
+/* Late registration: upstream's Subscribe() calls RegisterNodeHandler straight
+ * away when the story is already loaded, so a listener added after StoryLoaded
+ * still fires. Same here -- lua_osiris calls this from RegisterListener. */
+static void osi_node_hooks_bind_late(const char *name, int arity) {
+    if (!g_dbWalkDone) return;   /* the story-load pass will pick it up */
+    int r = osi_node_hooks_bind(name, arity);
+    if (r == 1) {
+        LOG_OSIRIS_DEBUG("Node hooks: bound late subscriber %s/%d", name, arity);
+    } else if (r < 0) {
+        LOG_OSIRIS_WARN("Couldn't register Osiris subscriber for %s/%d: "
+                        "symbol has no node in the story.", name, arity);
+    }
+}
+
+/* Bind every registered Lua listener whose symbol is a story node. Called after
+ * the name-index walk, which is this port's equivalent of StoryLoaded. */
+static void osi_node_hooks_install(void) {
+    g_nodeHookNodeCount = 0;
+
+    int count = lua_osiris_get_listener_count();
+    int bound = 0, unresolved = 0;
+    for (int i = 0; i < count; i++) {
+        OsirisListener *listener = lua_osiris_get_listener(i);
+        if (!listener) continue;
+        int r = osi_node_hooks_bind(listener->event_name, listener->arity);
+        if (r == 1) {
+            bound++;
+        } else if (r < 0) {
+            LOG_OSIRIS_WARN("Couldn't register Osiris subscriber for %s/%d: "
+                            "symbol has no node in the story.",
+                            listener->event_name, listener->arity);
+            unresolved++;
+        }
+    }
+
+    if (bound || unresolved) {
+        LOG_OSIRIS_INFO("Node hooks: %d listener(s) bound to %d node(s) across %d vtable(s), "
+                        "%d unresolved", bound, g_nodeHookNodeCount, g_nodeHookVtCount, unresolved);
+    }
+}
+
 static void osi_report_node_classes(void) {
     static int reported = 0;
     if (reported || !g_pOsiFunctionMan) return;
@@ -2123,6 +2365,11 @@ static void osi_db_discover(const char *why) {
     }
     osi_string_selftest();
     osi_report_node_classes();
+    /* Upstream binds subscriptions at StoryLoaded; the name-index walk is this
+     * port's equivalent, and node ids are only valid for the story that
+     * produced them. */
+    lua_osiris_set_node_binder(osi_node_hooks_bind_late);
+    osi_node_hooks_install();
 }
 
 static void osi_db_invalidate(const char *why) {
@@ -2920,9 +3167,16 @@ static int osi_node_insert_tuple(lua_State *L, const char *name, void *node, voi
         }
     }
 
-    if (!db) {
-        /* Proc/event: run the node's real entry point instead of forwarding a
-         * bare token. ForwardAddToken (+0x78) only propagates a token that the
+    {
+        /* Databases, procs and events all go through the node's real entry
+         * point, exactly as upstream's OsiInsert calls node->InsertTuple for
+         * Database/Proc/Event alike. Add() performs the whole database insert
+         * itself (pDBase -> CTuple::Copy -> CReteDBase::find -> insert), so the
+         * old path that called CReteDBase::insert and then ForwardAddToken by
+         * hand is redundant -- and worse, it bypassed the vtable entry point,
+         * so Lua listeners hooked on Add() never saw inserts made from Lua.
+         *
+         * Run the node's real entry point instead of forwarding a bare token. ForwardAddToken (+0x78) only propagates a token that the
          * validation/adaptor bookkeeping in Add() is assumed to have already
          * done, so calling it directly inserted the tuple and ran nothing --
          * which is why Osi.MakePlayer(char) resolved to the MakePlayer/1 story
@@ -2971,38 +3225,11 @@ static int osi_node_insert_tuple(lua_State *L, const char *name, void *node, voi
         }
         ((void (*)(void *, void *))addFn)(node, list);
 
-        LOG_OSIRIS_DEBUG("Osi.%s: dispatched via node Add() (%u args, proc/event)",
-                         name, count);
+        LOG_OSIRIS_DEBUG("Osi.%s: dispatched via node Add() (%u args, %s)",
+                         name, count, db ? "database" : "proc/event");
         osi_tuple_destroy(&tuple);
         return 0;
     }
-
-    bool inserted = true;
-    {
-        OsiCTuple copy = s_osi_tuple_copy(&tuple);   /* deep copy, values and all */
-        inserted = s_osi_dbase_insert(db, &copy) != 0;
-        osi_tuple_destroy(&copy);   /* no-op when insert moved the buffer out */
-    }
-
-    if (inserted) {
-        void *vptr = NULL, *fwd = NULL;
-        safe_memory_read_pointer((mach_vm_address_t)node, &vptr);
-        if (vptr) safe_memory_read_pointer((mach_vm_address_t)vptr + 0x78, &fwd);
-        if (fwd) {
-            ((void (*)(void *, const void *))fwd)(node, &tuple);
-        } else {
-            osi_tuple_destroy(&tuple);
-            return luaL_error(L, "Osi.%s: ForwardAddToken unreadable; the tuple was "
-                                 "stored but no rule was notified", name);
-        }
-        LOG_OSIRIS_DEBUG("Osi.%s: tuple inserted (%u args%s)", name, count,
-                         db ? "" : ", no database — proc/event");
-    } else {
-        LOG_OSIRIS_DEBUG("Osi.%s: row already present (no-op)", name);
-    }
-
-    osi_tuple_destroy(&tuple);
-    return 0;
 }
 
 /**
