@@ -2,7 +2,7 @@
 
 All notable changes to BG3SE-macOS are documented here.
 
-## Unreleased
+## v0.47.4 (2026-09-09)
 
 - **Database and PROC listeners fire.** `Ext.Osiris.RegisterListener` on a
   `DB_*`, `PROC_*` or `QRY_*` name registered successfully and then never fired,
