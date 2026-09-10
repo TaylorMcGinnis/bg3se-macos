@@ -2,6 +2,33 @@
 
 All notable changes to BG3SE-macOS are documented here.
 
+## Unreleased
+
+- **Appearance Edit Enhanced works end to end.** Three gaps blocked it, each hit
+  in turn as the previous one was fixed:
+  - `Array<T>` of POD structs is writable, so
+    `AppearanceOverride.Visual.Elements` (`Array<AppearanceMaterialSetting>`:
+    two Guids and three floats, no pointers) can be assigned. Structs that own
+    anything -- pointers, interned strings, nested arrays -- stay refused.
+  - `Array<float>` has a real element type instead of being opaque bytes, so
+    `Visual.AdditionalChoices` reads and writes.
+  - Array writes no longer free the previous buffer. Upstream can, because its
+    allocator provably matches; ours cannot, and handing an engine-allocated
+    pointer to `ls::MemoryManager::Free` is a free of memory we do not own --
+    heap corruption that surfaces later as a crash with no report. The cost is a
+    bounded leak of tens to a few hundred bytes per rewrite.
+- **`CharacterCreationTemplateOverride` is readable and writable.** Character
+  creation leaves it pointing at the template it built from, and the engine
+  derives the character's display name from it; the generated layout had it
+  read-only, so no mod could correct it.
+
+Known gap: after a resculpt an origin's display name shows their race. The
+character retains `ShapeshiftState` and `ServerShapeshiftEquipmentHistory`,
+and a shapeshift overrides the display name -- so the name is recomputed on
+every load and writing `DisplayName` does not stick. Neither component has a
+layout yet, neither is in the removal table, and `PROC_RemoveAllPolymorphs`
+does not clear them.
+
 ## v0.47.4 (2026-09-09)
 
 - **Database and PROC listeners fire.** `Ext.Osiris.RegisterListener` on a

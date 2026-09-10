@@ -660,22 +660,128 @@ static bool roll_map_write(lua_State *L, mach_vm_address_t addr, int tableIndex,
 #define PLAIN_ARRAY_HEADER_SIZE 0x10
 #define PLAIN_ARRAY_MAX_ELEMENTS 4096
 
+static size_t component_property_field_size(const ComponentPropertyDef *prop);
+
+/* A struct element can be rebuilt in place only if it owns nothing: every field
+ * must be a value written by a plain memcpy. Anything holding a pointer, an
+ * interned string index or a nested array needs lifetime handling this layer
+ * cannot provide, so those stay refused.
+ *
+ * This is what lets AppearanceEditEnhanced assign
+ * AppearanceOverride.Visual.Elements (Array<AppearanceMaterialSetting>:
+ * Guid, Guid, float, float, float -- pure POD). */
+static bool struct_elem_is_pod(const ComponentLayoutDef *layout) {
+    if (!layout || !layout->properties || layout->propertyCount <= 0) return false;
+    for (int i = 0; i < layout->propertyCount; i++) {
+        switch (layout->properties[i].type) {
+            case FIELD_TYPE_GUID:
+            case FIELD_TYPE_FLOAT:
+            case FIELD_TYPE_DOUBLE:
+            case FIELD_TYPE_INT8:  case FIELD_TYPE_UINT8:
+            case FIELD_TYPE_INT16: case FIELD_TYPE_UINT16:
+            case FIELD_TYPE_INT32: case FIELD_TYPE_UINT32:
+            case FIELD_TYPE_INT64: case FIELD_TYPE_UINT64:
+            case FIELD_TYPE_BOOL:
+                break;
+            default:
+                return false;   /* pointer, FixedString, array, nested struct */
+        }
+    }
+    return true;
+}
+
 static bool plain_array_elem_writable(const ComponentPropertyDef *prop) {
     if (!prop || prop->elemSize == 0) return false;
     switch (prop->elemType) {
         case ELEM_TYPE_GUID:          return prop->elemSize == sizeof(Guid);
         case ELEM_TYPE_ENTITY_HANDLE: return prop->elemSize == sizeof(uint64_t);
         case ELEM_TYPE_FIXED_STRING:  return prop->elemSize == sizeof(uint32_t);
+        case ELEM_TYPE_FLOAT:         return prop->elemSize == sizeof(float);
+        case ELEM_TYPE_STRUCT:        return struct_elem_is_pod(prop->structLayout);
         default:                      return false;
     }
 }
 
 // Convert the Lua value at valueIndex into one element at dst. Raises a Lua
 // error on malformed input; the caller must not hold heap memory across it.
+/* Stage one POD struct element from a Lua table: each named field written at its
+ * own offset. Missing fields keep the zero-fill the caller staged, which matches
+ * upstream's clear-then-assign semantics. */
+static void struct_elem_stage(lua_State *L, int valueIndex,
+                              const ComponentLayoutDef *layout,
+                              uint8_t *dst, const char *what, lua_Integer position) {
+    int absVal = lua_absindex(L, valueIndex);
+    if (lua_type(L, absVal) != LUA_TTABLE) {
+        luaL_error(L, "%s[%I]: expected a table of %s fields, got %s", what, position,
+                   layout->shortName ? layout->shortName : "struct",
+                   luaL_typename(L, absVal));
+        return;
+    }
+
+    for (int i = 0; i < layout->propertyCount; i++) {
+        const ComponentPropertyDef *f = &layout->properties[i];
+        lua_getfield(L, absVal, f->name);
+        if (lua_isnil(L, -1)) { lua_pop(L, 1); continue; }
+
+        uint8_t *at = dst + f->offset;
+        switch (f->type) {
+            case FIELD_TYPE_GUID: {
+                size_t slen = 0;
+                const char *s = luaL_checklstring(L, -1, &slen);
+                Guid g = {0, 0};
+                if (slen > 0) {
+                    const char *tail = slen > 36 ? s + slen - 36 : s;
+                    if (!guid_parse(tail, &g)) {
+                        luaL_error(L, "'%s' is not a valid GUID for %s[%I].%s", s, what,
+                                   position, f->name);
+                    }
+                }
+                memcpy(at, &g, sizeof(g));
+                break;
+            }
+            case FIELD_TYPE_FLOAT: {
+                float v = (float)luaL_checknumber(L, -1);
+                memcpy(at, &v, sizeof(v));
+                break;
+            }
+            case FIELD_TYPE_DOUBLE: {
+                double v = (double)luaL_checknumber(L, -1);
+                memcpy(at, &v, sizeof(v));
+                break;
+            }
+            case FIELD_TYPE_BOOL: {
+                uint8_t v = lua_toboolean(L, -1) ? 1 : 0;
+                memcpy(at, &v, sizeof(v));
+                break;
+            }
+            default: {
+                /* Remaining POD cases are integers of a known width. */
+                lua_Integer v = luaL_checkinteger(L, -1);
+                size_t width = component_property_field_size(f);
+                if (width == 0 || width > sizeof(lua_Integer)) {
+                    luaL_error(L, "%s[%I].%s: unsupported field width", what, position, f->name);
+                }
+                memcpy(at, &v, width);
+                break;
+            }
+        }
+        lua_pop(L, 1);
+    }
+}
+
 static void plain_array_stage_element(lua_State *L, int valueIndex,
                                       const ComponentPropertyDef *prop,
                                       uint8_t *dst, const char *what,
                                       lua_Integer position) {
+    if (prop->elemType == ELEM_TYPE_STRUCT) {
+        struct_elem_stage(L, valueIndex, prop->structLayout, dst, what, position);
+        return;
+    }
+    if (prop->elemType == ELEM_TYPE_FLOAT) {
+        float v = (float)luaL_checknumber(L, valueIndex);
+        memcpy(dst, &v, sizeof(v));
+        return;
+    }
     switch (prop->elemType) {
         case ELEM_TYPE_GUID: {
             // Same tolerance as FIELD_TYPE_GUID: canonical form or a
@@ -785,8 +891,23 @@ static bool plain_array_write(lua_State *L, mach_vm_address_t addr, int tableInd
         game_memory_free(buf);
         return false;
     }
-    game_memory_free((void *)(uintptr_t)oldBuf);
-    LOG_ENTITY_DEBUG("%s: rebuilt array with %zu element(s)", what, count);
+    /* Deliberately NOT freeing the previous buffer.
+     *
+     * Upstream frees because its allocator provably matches the one that
+     * produced the buffer. Ours does not: the array we are overwriting was very
+     * often allocated by the engine itself, and handing that pointer to
+     * ls::MemoryManager::Free is a free of memory we do not own -- heap
+     * corruption that surfaces later as a crash with no report, which is what a
+     * 2026-09-09 AppearanceEditEnhanced run looks like it hit.
+     *
+     * The cost of not freeing is a bounded leak: these arrays are tens to a few
+     * hundred bytes and mods rewrite them rarely (an appearance edit, a stat
+     * clone). That is a straightforward trade against corrupting the heap.
+     * Revisit only with the engine's own free path disassembled, so we can
+     * prove the allocator matches. */
+    (void)oldBuf;
+    LOG_ENTITY_DEBUG("%s: rebuilt array with %zu element(s) (old buffer intentionally not freed)",
+                     what, count);
     return true;
 }
 
@@ -1953,6 +2074,17 @@ static int array_proxy_push_element(lua_State *L, ArrayProxy *proxy, void *buf, 
             uint16_t val = 0;
             if (safe_memory_read((mach_vm_address_t)elemAddr, &val, sizeof(val))) {
                 lua_pushinteger(L, val);
+            } else {
+                lua_pushnil(L);
+            }
+            return 1;
+        }
+
+        case ELEM_TYPE_FLOAT: {
+            uint32_t raw = 0;
+            if (safe_memory_read_u32((mach_vm_address_t)elemAddr, &raw)) {
+                float f; memcpy(&f, &raw, sizeof(f));
+                lua_pushnumber(L, (lua_Number)f);
             } else {
                 lua_pushnil(L);
             }

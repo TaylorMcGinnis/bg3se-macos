@@ -8151,9 +8151,7 @@ static const ComponentPropertyDef g_CharacterCreationAppearance_Properties[] = {
     { "Visuals",           0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_GUID, 16 },
     { "Elements",          0x10, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_STRUCT, 0x30,
       .structLayout = &g_AppearanceMaterialSetting_Layout },
-    /* Array<float>; there is no ELEM_TYPE_FLOAT, and raw 4-byte elements are
-     * enough for the count-and-copy use mods make of it. */
-    { "AdditionalChoices", 0x20, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_UNKNOWN, 4 },
+    { "AdditionalChoices", 0x20, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_FLOAT, 4 },
     { "SkinColor",         0x30, FIELD_TYPE_GUID, 0, false },
     { "EyeColor",          0x40, FIELD_TYPE_GUID, 0, false },
     { "SecondEyeColor",    0x50, FIELD_TYPE_GUID, 0, false },
@@ -8190,9 +8188,33 @@ static const ComponentLayoutDef g_AppearanceOverrideComponent_Layout = {
     .propertyCount = sizeof(g_AppearanceOverrideComponent_Properties) / sizeof(g_AppearanceOverrideComponent_Properties[0]),
 };
 
+/* Character creation leaves this behind pointing at the template it built the
+ * character from, and the engine derives the character's display name from it.
+ * After an Appearance Edit Enhanced resculpt an origin therefore shows the
+ * generic race name ("Elf") instead of "Karlach", and rewriting
+ * DisplayName.NameHandle does not stick because the name is recomputed on load.
+ *
+ * The generated table has this read-only, so nothing could correct it. Same
+ * single FixedString at offset 0 (Ghidra-verified size 0x4), and the value has
+ * been confirmed live, so it lives here as a verified, writable layout: a mod
+ * can point the override back at the character's own template. */
+static const ComponentPropertyDef g_CharacterCreationTemplateOverride_Properties[] = {
+    { "Template", 0x00, FIELD_TYPE_FIXEDSTRING, 0, false },
+};
+
+static const ComponentLayoutDef g_CharacterCreationTemplateOverride_Layout = {
+    .componentName = "eoc::object_visual::CharacterCreationTemplateOverrideComponent",
+    .shortName = "CharacterCreationTemplateOverride",
+    .componentTypeIndex = 0,
+    .componentSize = 0x4,
+    .properties = g_CharacterCreationTemplateOverride_Properties,
+    .propertyCount = sizeof(g_CharacterCreationTemplateOverride_Properties) / sizeof(g_CharacterCreationTemplateOverride_Properties[0]),
+};
+
 static const ComponentLayoutDef* g_AllComponentLayouts[] = {
     &g_CharacterCreationAppearance_Layout,
     &g_AppearanceOverrideComponent_Layout,
+    &g_CharacterCreationTemplateOverride_Layout,
     &g_HealthComponent_Layout,
     &g_BaseHpComponent_Layout,
     &g_ArmorComponent_Layout,
