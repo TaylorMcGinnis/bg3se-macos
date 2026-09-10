@@ -23,6 +23,7 @@
 #include "../core/safe_memory.h"
 #include "../core/logging.h"
 #include "../core/game_memory.h"
+#include "../core/stdstring.h"
 #include "../lifetime/lifetime.h"
 #include "../strings/fixed_string.h"
 #include "guid_lookup.h"
@@ -55,6 +56,11 @@
 #define MAX_COMPONENT_LAYOUTS 4096
 #define COMPONENT_PROXY_METATABLE "bg3se.ComponentProxy"
 #define ARRAY_PROXY_METATABLE "bg3se.ArrayProxy"
+
+// Upper bound for staging one array element on the stack in array_proxy_newindex.
+// The widest element we model is AppearanceMaterialSetting at 0x30 bytes; 256
+// leaves generous headroom and keeps the staging buffer off the heap.
+#define ARRAY_ELEM_STAGE_MAX 256
 
 // Array<T> memory layout on ARM64
 #define ARRAY_BUF_OFFSET    0x00   // T* buf_
@@ -1167,6 +1173,20 @@ int component_property_read_def(lua_State *L, void *componentPtr,
             return 1;
         }
 
+        case FIELD_TYPE_STDSTRING: {
+            // ls::STDString by value (core/stdstring.h). Upstream hands these
+            // back as plain Lua strings; an unreadable header reads as nil
+            // rather than raising, matching every other field here.
+            size_t len = 0;
+            const char *s = stdstring_read((const void *)addr, &len);
+            if (!s) {
+                lua_pushnil(L);
+            } else {
+                lua_pushlstring(L, s, len);
+            }
+            return 1;
+        }
+
         case FIELD_TYPE_DYNAMIC_ARRAY: {
             // Dynamic Array<T> - return an array proxy
             component_property_push_array_proxy(L, (void *)addr, prop);
@@ -1303,6 +1323,9 @@ static size_t component_property_field_size(const ComponentPropertyDef *prop) {
 
         case FIELD_TYPE_GUID:
             return sizeof(Guid);
+
+        case FIELD_TYPE_STDSTRING:
+            return STDSTRING_SIZE;
 
         case FIELD_TYPE_ROLL_MAP:
             // RefMapInternals header; the nodes hang off HashTable.
@@ -1483,6 +1506,25 @@ bool component_property_write(lua_State *L, void *componentPtr,
                 }
             }
             wrote = safe_memory_write(address, &fs, sizeof(fs));
+            break;
+        }
+
+        case FIELD_TYPE_STDSTRING: {
+            /* Written in place. A value that fits inline needs no allocation at
+             * all; a longer one takes a fresh buffer from the game allocator.
+             * The previous out-of-line buffer is deliberately not freed -- it
+             * belongs to the engine's allocator, and releasing engine memory
+             * through ours is heap corruption (the same reason plain_array_write
+             * leaves its old buffer alone). */
+            size_t slen = 0;
+            const char *s = luaL_checklstring(L, valueIndex, &slen);
+            wrote = stdstring_write((void *)address, s, slen, game_memory_alloc);
+            if (!wrote) {
+                luaL_error(L, "Could not write string for %s.%s "
+                              "(no allocator available for %d bytes)",
+                           layout->componentName, propertyName, (int)slen);
+                return false;
+            }
             break;
         }
 
@@ -2286,14 +2328,15 @@ static int array_proxy_index(lua_State *L) {
         return lifetime_lua_expired_error(L, "Array");
     }
 
-    // Get index (1-based in Lua)
-    if (!lua_isinteger(L, 2)) {
-        lua_pushnil(L);
-        return 1;
-    }
-
-    lua_Integer luaIndex = lua_tointeger(L, 2);
-    if (luaIndex < 1) {
+    // Get index (1-based in Lua). lua_tointegerx, not lua_isinteger: a numeric
+    // string key has to convert the way Lua's own indexing does. Mods build
+    // element tables with string keys (AppearanceEditEnhanced keeps its stock
+    // origin appearances as Elements = { ["1"] = {...} }) and then copy them
+    // across with old[k] = new[k]; rejecting "1" made every such write a
+    // silent no-op.
+    int isNum = 0;
+    lua_Integer luaIndex = lua_tointegerx(L, 2, &isNum);
+    if (!isNum || luaIndex < 1) {
         lua_pushnil(L);
         return 1;
     }
@@ -2314,6 +2357,82 @@ static int array_proxy_index(lua_State *L) {
     }
 
     return array_proxy_push_element(L, proxy, buf, index);
+}
+
+/* Assign one element in place: arr[i] = v.
+ *
+ * Upstream's array proxies are writable; ours were read-only, so any mod that
+ * assigned an element got "attempt to index a bg3se.ArrayProxy value" instead.
+ * That is not a niche path -- it is how mods edit an appearance in place
+ * (AppearanceEditEnhanced's Utils.TempClean/TempWrite walk the component and
+ * write each element back), so the whole restore silently failed.
+ *
+ * This only overwrites an existing slot; it never grows the array, because the
+ * buffer belongs to the engine allocator. Element conversion and the writable
+ * check are the same ones whole-array writes use, so an element assignment can
+ * never accept a value the array-level write would reject. */
+static int array_proxy_newindex(lua_State *L) {
+    ArrayProxy *proxy = (ArrayProxy *)luaL_checkudata(L, 1, ARRAY_PROXY_METATABLE);
+    if (!lifetime_lua_is_valid(L, proxy->lifetime)) {
+        return lifetime_lua_expired_error(L, "Array");
+    }
+
+    int isNum = 0;
+    lua_Integer luaIndex = lua_tointegerx(L, 2, &isNum);
+    if (!isNum) {
+        return luaL_error(L, "Array index must be a number, got %s",
+                          luaL_typename(L, 2));
+    }
+
+    /* A view over the proxy's element description, so plain_array_elem_writable
+     * and plain_array_stage_element apply unchanged. */
+    ComponentPropertyDef elemProp = {
+        .name = "element",
+        .offset = 0,
+        .type = FIELD_TYPE_DYNAMIC_ARRAY,
+        .arraySize = 0,
+        .readOnly = false,
+        .elemType = proxy->elemType,
+        .elemSize = proxy->elemSize,
+        .enumDef = NULL,
+        .structLayout = proxy->structLayout,
+        .valueType = ELEM_TYPE_UNKNOWN,
+        .valueSize = 0,
+    };
+
+    if (!plain_array_elem_writable(&elemProp)) {
+        return luaL_error(L,
+                          "Cannot assign to elements of this array "
+                          "(unsupported element type)");
+    }
+
+    void *buf = NULL;
+    uint32_t size = 0;
+    if (!array_proxy_read_metadata(proxy, &buf, &size) || !buf) {
+        return luaL_error(L, "Array is not readable");
+    }
+
+    if (luaIndex < 1 || (uint64_t)luaIndex > (uint64_t)size) {
+        return luaL_error(L, "Array index %I out of bounds (size %d)",
+                          luaIndex, (int)size);
+    }
+
+    /* Stage into a stack buffer first: plain_array_stage_element raises a Lua
+     * error on malformed input, and a longjmp must not leak heap memory or
+     * leave a half-written element in engine memory. */
+    uint8_t staged[ARRAY_ELEM_STAGE_MAX];
+    if (proxy->elemSize > sizeof(staged)) {
+        return luaL_error(L, "Array element of %d bytes is too large to assign",
+                          (int)proxy->elemSize);
+    }
+    memset(staged, 0, proxy->elemSize);
+    plain_array_stage_element(L, 3, &elemProp, staged, "Array", luaIndex);
+
+    uintptr_t elemAddr = (uintptr_t)buf + ((uint32_t)(luaIndex - 1) * proxy->elemSize);
+    if (!safe_memory_write((mach_vm_address_t)elemAddr, staged, proxy->elemSize)) {
+        return luaL_error(L, "Failed to write array element %I", luaIndex);
+    }
+    return 0;
 }
 
 static int array_proxy_len(lua_State *L) {
@@ -2640,6 +2759,9 @@ void component_property_register_lua(lua_State *L) {
 
     lua_pushcfunction(L, array_proxy_index);
     lua_setfield(L, -2, "__index");
+
+    lua_pushcfunction(L, array_proxy_newindex);
+    lua_setfield(L, -2, "__newindex");
 
     lua_pushcfunction(L, array_proxy_len);
     lua_setfield(L, -2, "__len");

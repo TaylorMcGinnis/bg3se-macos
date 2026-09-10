@@ -35,6 +35,10 @@ typedef enum {
     FIELD_TYPE_FLOAT,
     FIELD_TYPE_DOUBLE,
     FIELD_TYPE_FIXEDSTRING,     // uint32_t index -> resolve to string
+    // ls::STDString by value, 16 bytes (core/stdstring.h). Reads as a Lua
+    // string; writes go in place, inline for short values. Upstream declares
+    // these as std::basic_string -- do not size them from the header.
+    FIELD_TYPE_STDSTRING,
     FIELD_TYPE_GUID,            // 16-byte UUID
     FIELD_TYPE_ENTITY_HANDLE,   // uint64_t
     FIELD_TYPE_VEC3,            // float[3]

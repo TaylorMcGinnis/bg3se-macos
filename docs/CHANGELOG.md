@@ -22,12 +22,48 @@ All notable changes to BG3SE-macOS are documented here.
   derives the character's display name from it; the generated layout had it
   read-only, so no mod could correct it.
 
-Known gap: after a resculpt an origin's display name shows their race. The
-character retains `ShapeshiftState` and `ServerShapeshiftEquipmentHistory`,
-and a shapeshift overrides the display name -- so the name is recomputed on
-every load and writing `DisplayName` does not stick. Neither component has a
-layout yet, neither is in the removal table, and `PROC_RemoveAllPolymorphs`
-does not clear them.
+- **`Array<T>` elements are assignable: `arr[i] = v`.** The array proxy had
+  `__index`/`__len`/`__pairs` but no `__newindex`, so an element write raised
+  "attempt to index a bg3se.ArrayProxy value". Upstream's arrays are writable,
+  and mods edit appearances that way -- Appearance Edit Enhanced's
+  `Utils.TempClean`/`TempWrite` walk a component and write each element back, so
+  its entire appearance-restore path failed silently on macOS, for every
+  character. Element conversion and the writable check are the ones whole-array
+  writes already use, so an element assignment cannot accept a value the
+  array-level write would reject; it never grows the array.
+- **Array indices accept numeric strings.** `__index` used `lua_isinteger`, so
+  `arr["1"]` returned nil where Lua's own indexing converts. Mods keep element
+  tables keyed `["1"]` (Appearance Edit Enhanced stores every stock origin
+  appearance that way), and copying one across was a silent no-op.
+- **`STDString` moved to `core/stdstring.{h,c}`.** The 16-byte layout and its
+  read/write were `static` inside `lua_resource_object.c`; the ECS component
+  layer needs them too, and this layout is far too easy to get wrong to carry
+  twice. The allocator is now injected by the caller, so the module has no
+  dependency on the offset table and links into the tests.
+- **`FIELD_TYPE_STDSTRING`, and `eoc::CustomNameComponent` has a layout.**
+  `CustomName` is a single `STDString` at offset 0 -- the name the player types
+  in character creation, which the engine displays in preference to the
+  template's. Verified live in both directions against a known-good character
+  before anything was written. Long values allocate through `game_memory_alloc`;
+  the previous engine-owned buffer is deliberately not freed, for the same
+  reason array writes leave theirs alone.
+
+Correcting an earlier entry: the resculpted-origin display name was **not** a
+shapeshift problem. Appearance Edit Enhanced copies
+`CharacterCreationStats.Race`/`SubRace` from the character-creation copy by
+design (that is how a resculpt changes race), and on an origin that must be
+blocked by the origin's `LockRace`, which vanilla origins do not set. The name
+then follows the race. `Osi.Transform`/`RemoveTransforms` are clean single
+overloads and dispatch correctly. A speculative `esv::shapeshift::StatesComponent`
+layout written against that wrong theory has been dropped rather than committed:
+its `StateCount` read 2 on characters with no active transform, and it exposed
+that field writable.
+
+Known gap: `Ext.Types.Serialize` accepts only component and component-array
+userdata, so a root template (a `BG3SE.ResourceObject` proxy, which already has
+layout-driven read/write) is refused. Mods clone templates through
+Serialize/Unserialize inside an `xpcall` and discard the error, so this fails
+silently rather than reporting.
 
 ## v0.47.4 (2026-09-09)
 

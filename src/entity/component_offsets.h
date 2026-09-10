@@ -12,6 +12,7 @@
 
 #include "component_property.h"
 #include "generated_enums.h"
+#include "../core/stdstring.h"  // STDSTRING_SIZE for by-value string fields
 #include <stddef.h>  // For NULL
 
 // ============================================================================
@@ -8188,6 +8189,32 @@ static const ComponentLayoutDef g_AppearanceOverrideComponent_Layout = {
     .propertyCount = sizeof(g_AppearanceOverrideComponent_Properties) / sizeof(g_AppearanceOverrideComponent_Properties[0]),
 };
 
+/* The player-typed name from character creation. Upstream is
+ * `struct CustomNameComponent { STDString Name; }` (Components/Visual.h) -- one
+ * ls::STDString at offset 0, 0x10 bytes on this build (core/stdstring.h), NOT
+ * the 24/32-byte std::basic_string the header's declaration implies.
+ *
+ * The engine shows this in preference to the template's DisplayName, so it is
+ * how a renamed character keeps its name. Appearance Edit Enhanced never copies
+ * it: Constants.Replications carries only CharacterCreationAppearance,
+ * GameObjectVisual, BodyType and Race, so a resculpted origin loses the name
+ * typed in character creation and falls back to the race name. Verified live by
+ * comparing a working renamed character (CustomName present, DisplayName.
+ * NameHandle a runtime ResStr_) against a broken one (component absent,
+ * NameHandle a static race handle). */
+static const ComponentPropertyDef g_CustomNameComponent_Properties[] = {
+    { "Name", 0x00, FIELD_TYPE_STDSTRING, 0, false },
+};
+
+static const ComponentLayoutDef g_CustomNameComponent_Layout = {
+    .componentName = "eoc::CustomNameComponent",
+    .shortName = "CustomName",
+    .componentTypeIndex = 0,
+    .componentSize = STDSTRING_SIZE,
+    .properties = g_CustomNameComponent_Properties,
+    .propertyCount = sizeof(g_CustomNameComponent_Properties) / sizeof(g_CustomNameComponent_Properties[0]),
+};
+
 /* Character creation leaves this behind pointing at the template it built the
  * character from, and the engine derives the character's display name from it.
  * After an Appearance Edit Enhanced resculpt an origin therefore shows the
@@ -8214,6 +8241,7 @@ static const ComponentLayoutDef g_CharacterCreationTemplateOverride_Layout = {
 static const ComponentLayoutDef* g_AllComponentLayouts[] = {
     &g_CharacterCreationAppearance_Layout,
     &g_AppearanceOverrideComponent_Layout,
+    &g_CustomNameComponent_Layout,
     &g_CharacterCreationTemplateOverride_Layout,
     &g_HealthComponent_Layout,
     &g_BaseHpComponent_Layout,

@@ -148,6 +148,7 @@ add_library(bg3se SHARED
     src/injector/main.c
     src/core/logging.c
     src/core/safe_memory.c
+    src/core/stdstring.c
     src/core/crashlog.c
     src/core/version_detect.c
     src/core/offset_table.c
@@ -402,6 +403,7 @@ if(BUILD_TESTS)
         tests/tier0/test_persistentvars.c
         tests/tier0/stub_logging.c
         src/core/safe_memory.c
+        src/core/stdstring.c
         src/entity/guid_lookup.c
         src/osiris/pattern_scan.c
         src/mod/mod_paths.c

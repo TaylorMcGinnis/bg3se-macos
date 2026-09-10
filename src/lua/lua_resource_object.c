@@ -13,6 +13,7 @@
 #include "../localization/localization.h"
 #include "../core/offset_table.h"
 #include "../core/safe_memory.h"
+#include "../core/stdstring.h"
 #include "../core/logging.h"
 
 #include <lauxlib.h>
@@ -62,38 +63,11 @@ typedef struct {
 // byte 15, and a 231-character Boosts string out of line with its capacity
 // at +12 carrying the 0x80000000 flag.
 
-#define STDSTRING_SIZE            16
-#define STDSTRING_INLINE_MAX      15   // characters that fit inline
-#define STDSTRING_WRITE_INLINE_MAX 14  // leave room for a terminator when we write
-
-/** Returns a pointer to the characters and the length, or NULL. */
+/* The STDString layout and its read/write live in core/stdstring.c so the ECS
+ * component property layer shares this one verified implementation. These stay
+ * as thin forwarders to keep the call sites below unchanged. */
 static const char *read_stdstring(const void *addr, size_t *out_len) {
-    if (!addr) return NULL;
-    const uint8_t *p = (const uint8_t *)addr;
-
-    uint8_t flag_byte = 0;
-    if (!safe_memory_read_u8((mach_vm_address_t)(p + 15), &flag_byte)) return NULL;
-
-    if (!(flag_byte & 0x80)) {
-        size_t len = flag_byte & 0x7f;
-        if (len > STDSTRING_INLINE_MAX) return NULL;
-        *out_len = len;
-        return (const char *)p;
-    }
-
-    void *data = NULL;
-    uint32_t size = 0, cap = 0;
-    if (!safe_memory_read_u64((mach_vm_address_t)(p + 0), (uint64_t *)&data)) return NULL;
-    if (!safe_memory_read_u32((mach_vm_address_t)(p + 8), &size)) return NULL;
-    if (!safe_memory_read_u32((mach_vm_address_t)(p + 12), &cap)) return NULL;
-    cap &= 0x7fffffffu;
-
-    if (!data || size > cap || cap > (1u << 24)) return NULL;
-    uint8_t probe = 0;
-    if (!safe_memory_read_u8((mach_vm_address_t)data, &probe)) return NULL;
-
-    *out_len = (size_t)size;
-    return (const char *)data;
+    return stdstring_read(addr, out_len);
 }
 
 typedef void *(*ResourceAllocateFunc)(size_t size, uint32_t alloc_type, int a3, size_t a4);
@@ -109,26 +83,10 @@ static void *resource_game_alloc(size_t size) {
     return alloc(size, 0, 0, 0);
 }
 
-/** Overwrite an STDString in place. Short strings need no allocation. */
+/** Overwrite an STDString in place, allocating through the resource allocator
+ *  this file already uses for its other out-of-line buffers. */
 static bool write_stdstring(void *addr, const char *str, size_t len) {
-    if (!addr) return false;
-    uint8_t *p = (uint8_t *)addr;
-
-    if (len <= STDSTRING_WRITE_INLINE_MAX) {
-        memset(p, 0, STDSTRING_SIZE);
-        memcpy(p, str, len);
-        p[15] = (uint8_t)(len & 0x7f);
-        return true;
-    }
-
-    char *buf = (char *)resource_game_alloc(len + 1);
-    if (!buf) return false;
-    memcpy(buf, str, len);
-    buf[len] = '\0';
-    *(void **)(p + 0) = buf;
-    *(uint32_t *)(p + 8) = (uint32_t)len;
-    *(uint32_t *)(p + 12) = (uint32_t)(len + 1) | 0x80000000u;
-    return true;
+    return stdstring_write(addr, str, len, resource_game_alloc);
 }
 
 // ============================================================================
