@@ -620,6 +620,76 @@ static const ComponentLayoutDef g_SpellId_Layout = {
     .propertyCount = sizeof(g_SpellId_Properties) / sizeof(g_SpellId_Properties[0]),
 };
 
+/* SpellMetaId is SpellId's base: upstream is
+ * `struct SpellId : public SpellMetaId { FixedString Prototype; }`, so the two
+ * share offsets exactly and SpellMetaId simply ends where Prototype begins.
+ * It reuses g_SpellId_Properties with a shorter count rather than restating
+ * offsets that were verified live above. */
+static const ComponentLayoutDef g_SpellMetaId_Layout = {
+    .componentName = "SpellMetaId",
+    .shortName = "SpellMetaId",
+    .componentTypeIndex = 0,
+    .componentSize = 0x30,
+    .properties = g_SpellId_Properties,
+    .propertyCount = 4,   // through ProgressionSource@0x20; Prototype@0x30 is SpellId's
+};
+
+/* eoc::spell::BookPreparesComponent -- upstream (Components/Spell.h:225) is
+ * `Array<SpellMetaId> PreparedSpells; HashMap<Guid,int> ClassPreparedSpellCount;
+ * HashMap<Guid,int> ClassFallbackPreparedSpellCount;`.
+ *
+ * Only PreparedSpells is described here, at offset 0 where the array header
+ * always sits; the two HashMaps are left out rather than guessed, since the
+ * header's legacy field_30/field_88 names imply offsets that do not fit this
+ * build's Array and HashMap sizes.
+ *
+ * Without this component Appearance Edit Enhanced's resculpt raised
+ * "attempt to index a nil value (field 'SpellBookPrepares')" partway through
+ * its finish handler, which silently killed everything after it -- including
+ * restoring the character's name. */
+static const ComponentPropertyDef g_SpellBookPrepares_Properties[] = {
+    { "PreparedSpells", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, true,
+      ELEM_TYPE_STRUCT, 0x30, .structLayout = &g_SpellMetaId_Layout },
+};
+
+static const ComponentLayoutDef g_SpellBookPrepares_Layout = {
+    .componentName = "eoc::spell::BookPreparesComponent",
+    .shortName = "SpellBookPrepares",
+    .componentTypeIndex = 0,
+    .componentSize = 0x90,
+    .properties = g_SpellBookPrepares_Properties,
+    .propertyCount = sizeof(g_SpellBookPrepares_Properties) / sizeof(g_SpellBookPrepares_Properties[0]),
+};
+
+/* eoc::GameObjectVisualComponent -- same offsets as the generated table (size
+ * 0x14, Ghidra verified), promoted here so it is writable: a generated layout
+ * refuses every write, which made `Entity.GameObjectVisual.Type = 2` fail with
+ * "Cannot set component property" and broke Appearance Edit Enhanced's
+ * CopyAppearanceVisuals (Utils.lua:796).
+ *
+ * Corroborated live on 4.1.1.7398727 by reading all five fields off two
+ * different origins: Icon resolved to their EQ_<name> icon, RootTemplateId to
+ * their own template GUID, RootTemplateType 1, Scale 1.0, Type 0.
+ *
+ * Every field is a POD with no ownership (a FixedString index, two integers, a
+ * float), so all are writable as they are upstream. */
+static const ComponentPropertyDef g_GameObjectVisual_Properties[] = {
+    { "RootTemplateId",   0x00, FIELD_TYPE_FIXEDSTRING, 0, false },
+    { "RootTemplateType", 0x04, FIELD_TYPE_UINT8,       0, false },
+    { "Icon",             0x08, FIELD_TYPE_FIXEDSTRING, 0, false },
+    { "Scale",            0x0c, FIELD_TYPE_FLOAT,       0, false },
+    { "Type",             0x10, FIELD_TYPE_UINT8,       0, false },
+};
+
+static const ComponentLayoutDef g_GameObjectVisual_Layout = {
+    .componentName = "eoc::GameObjectVisualComponent",
+    .shortName = "GameObjectVisual",
+    .componentTypeIndex = 0,
+    .componentSize = 0x14,
+    .properties = g_GameObjectVisual_Properties,
+    .propertyCount = sizeof(g_GameObjectVisual_Properties) / sizeof(g_GameObjectVisual_Properties[0]),
+};
+
 // CastRequirements { uint8 CastContext; CastRequirementFlags Requirements; }
 // — 8 bytes per the upstream header (uint8 + pad + uint32 bitmask); element
 // contents not yet checked live, so read-only.
@@ -8242,6 +8312,8 @@ static const ComponentLayoutDef* g_AllComponentLayouts[] = {
     &g_CharacterCreationAppearance_Layout,
     &g_AppearanceOverrideComponent_Layout,
     &g_CustomNameComponent_Layout,
+    &g_SpellBookPrepares_Layout,
+    &g_GameObjectVisual_Layout,
     &g_CharacterCreationTemplateOverride_Layout,
     &g_HealthComponent_Layout,
     &g_BaseHpComponent_Layout,

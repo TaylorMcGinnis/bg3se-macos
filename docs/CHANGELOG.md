@@ -59,6 +59,21 @@ layout written against that wrong theory has been dropped rather than committed:
 its `StateCount` read 2 on characters with no active transform, and it exposed
 that field writable.
 
+- **`SpellBookPrepares` and `GameObjectVisual` layouts.**
+  `eoc::spell::BookPreparesComponent` had no layout at all, so `SpellBookPrepares`
+  read nil; Appearance Edit Enhanced's resculpt raised on it partway through its
+  finish handler and silently lost everything after that point, including
+  restoring the character's name. Only `PreparedSpells` is described -- an
+  `Array<SpellMetaId>` at offset 0, reusing the already-live-verified `SpellId`
+  property table with a shorter count, since upstream is
+  `struct SpellId : public SpellMetaId { FixedString Prototype; }`. The two
+  trailing HashMaps are left out rather than guessed. Verified live: 82 prepared
+  spells with real prototypes and `SourceType` resolving to labels.
+  `eoc::GameObjectVisualComponent` had only a generated layout, and generated
+  layouts refuse every write, so `GameObjectVisual.Type = 2` failed with "Cannot
+  set component property". Promoted to a hand-verified layout at the same
+  Ghidra-verified offsets, all five fields writable as upstream has them.
+
 Known gap: `Ext.Types.Serialize` accepts only component and component-array
 userdata, so a root template (a `BG3SE.ResourceObject` proxy, which already has
 layout-driven read/write) is refused. Mods clone templates through
