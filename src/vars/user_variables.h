@@ -236,6 +236,16 @@ void mvar_cache_invalidate(lua_State *L, const char *mod_uuid, const char *key);
 void mvar_cache_clear(lua_State *L);
 
 /**
+ * Repoint persisted variables at a different playthrough: drop cached values
+ * and reload from the new campaign's store. Registered prototypes are kept,
+ * since mods register those once during bootstrap.
+ *
+ * Flush the outgoing campaign (uvar_save_all / mvar_save_all) BEFORE changing
+ * the campaign key, or the pending write lands in the incoming campaign's file.
+ */
+void vars_on_campaign_changed(lua_State *L);
+
+/**
  * Mark mod variables as dirty.
  */
 void mvar_mark_dirty(const char *mod_uuid, const char *key);

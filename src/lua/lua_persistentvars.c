@@ -9,6 +9,7 @@
 #include "lua_json.h"
 #include "logging.h"
 #include "../game/game_state.h"
+#include "../vars/campaign_key.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -139,6 +140,9 @@ static uint64_t get_monotonic_ms(void) {
 // Helper: Ensure directory exists
 // ============================================================================
 
+static const char *get_support_dir(void);
+void persist_restore_all(lua_State *L);
+
 static int ensure_directory(const char *path) {
     struct stat st;
     if (stat(path, &st) == 0) {
@@ -150,6 +154,88 @@ static int ensure_directory(const char *path) {
 // ============================================================================
 // Helper: Get BG3SE support directory
 // ============================================================================
+
+/* PersistentVars are per-playthrough, like mod and user variables
+ * (vars/campaign_key.h): "persistentvars/<campaign>/<ModTable>.json", falling
+ * back to the flat legacy directory while no campaign is loaded. */
+static int persist_build_dir(void) {
+    const char *support = get_support_dir();
+    if (!support || support[0] == '\0') return -1;
+
+    char base[PATH_MAX];
+    snprintf(base, sizeof(base), "%s/%s", support, PERSIST_DIR_NAME);
+    if (ensure_directory(base) != 0) return -1;
+
+    const char *key = campaign_key_get();
+    if (!key) {
+        snprintf(s_persistDir, sizeof(s_persistDir), "%s", base);
+        return 0;
+    }
+
+    snprintf(s_persistDir, sizeof(s_persistDir), "%s/%s", base, key);
+    return ensure_directory(s_persistDir);
+}
+
+/* Seed a campaign's directory from the flat legacy one the first time it is
+ * used, so playthroughs that predate per-campaign storage keep their state.
+ * Copied per campaign rather than moved: entries are keyed by character UUID,
+ * which repeats across playthroughs, so every campaign keeps working and they
+ * diverge from here on. */
+static void persist_seed_from_legacy(void) {
+    const char *support = get_support_dir();
+    const char *key = campaign_key_get();
+    if (!support || !key) return;
+
+    char legacy[PATH_MAX];
+    snprintf(legacy, sizeof(legacy), "%s/%s", support, PERSIST_DIR_NAME);
+
+    DIR *dir = opendir(legacy);
+    if (!dir) return;
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        size_t n = strlen(entry->d_name);
+        if (n < 6 || strcmp(entry->d_name + n - 5, ".json") != 0) continue;
+
+        char dst_path[PATH_MAX];
+        snprintf(dst_path, sizeof(dst_path), "%s/%s", s_persistDir, entry->d_name);
+        if (access(dst_path, F_OK) == 0) continue;  // campaign already has it
+
+        char src_path[PATH_MAX];
+        snprintf(src_path, sizeof(src_path), "%s/%s", legacy, entry->d_name);
+
+        FILE *src = fopen(src_path, "rb");
+        if (!src) continue;
+        FILE *dst = fopen(dst_path, "wb");
+        if (!dst) { fclose(src); continue; }
+
+        char buf[8192];
+        size_t got;
+        bool ok = true;
+        while ((got = fread(buf, 1, sizeof(buf), src)) > 0) {
+            if (fwrite(buf, 1, got, dst) != got) { ok = false; break; }
+        }
+        fclose(src);
+        if (fclose(dst) != 0) ok = false;
+        if (!ok) unlink(dst_path);
+    }
+    closedir(dir);
+}
+
+void persist_on_campaign_changed(lua_State *L) {
+    if (!s_initialized) return;
+
+    if (persist_build_dir() != 0) {
+        LOG_PERSIST_ERROR("Failed to point persist dir at campaign");
+        return;
+    }
+    persist_seed_from_legacy();
+
+    LOG_PERSIST_INFO("Campaign storage: %s", s_persistDir);
+
+    s_loaded = 0;
+    persist_restore_all(L);
+}
 
 static const char *get_support_dir(void) {
     static char s_supportDir[PATH_MAX] = {0};
@@ -287,8 +373,7 @@ void persist_init(void) {
     }
 
     // Create persistentvars subdirectory
-    snprintf(s_persistDir, sizeof(s_persistDir), "%s/%s", support, PERSIST_DIR_NAME);
-    if (ensure_directory(s_persistDir) != 0) {
+    if (persist_build_dir() != 0) {
         LOG_PERSIST_ERROR("Failed to create persist dir: %s", s_persistDir);
         return;
     }

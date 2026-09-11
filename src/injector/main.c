@@ -105,6 +105,7 @@ extern "C" {
 
 // User Variables (entity.Vars)
 #include "user_variables.h"
+#include "campaign_key.h"
 
 // Event system
 #include "lua_events.h"
@@ -5274,6 +5275,68 @@ typedef enum {
 
 static SessionInitState s_session_init_state = SESSION_INIT_IDLE;
 
+/* Identify the loaded playthrough and point persisted variables at it.
+ *
+ * The campaign's avatar is the identity (see vars/campaign_key.h). It is read
+ * through Osiris rather than by scanning components because DB_Avatars is
+ * exactly the engine's own answer to "who is this campaign's player character",
+ * and it does not move when the player takes control of a companion the way
+ * GetHostCharacter() does.
+ *
+ * The outgoing campaign is flushed BEFORE the key changes, so its pending
+ * writes land in its own file and not the incoming one. */
+static void vars_update_campaign(lua_State *L) {
+    if (!L) return;
+
+    static const char *kFindAvatar =
+        "local ok, rows = pcall(function() return Osi.DB_Avatars:Get(nil) end)\n"
+        "if not ok or type(rows) ~= 'table' or #rows == 0 then return nil end\n"
+        "local best\n"
+        "for _, r in ipairs(rows) do\n"
+        "  local u = tostring(r[1])\n"
+        "  if best == nil or u < best then best = u end\n"
+        "end\n"
+        "return best\n";
+
+    int top = lua_gettop(L);
+    char candidate[CAMPAIGN_KEY_MAX] = {0};
+
+    if (luaL_loadstring(L, kFindAvatar) != LUA_OK) {
+        LOG_LUA_ERROR("Campaign key probe failed to compile: %s", lua_tostring(L, -1));
+        lua_settop(L, top);
+        return;
+    }
+    if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
+        LOG_LUA_DEBUG("Campaign key probe failed: %s", lua_tostring(L, -1));
+        lua_settop(L, top);
+        return;
+    }
+    if (lua_type(L, -1) == LUA_TSTRING) {
+        const char *s = lua_tostring(L, -1);
+        if (s) {
+            strncpy(candidate, s, sizeof(candidate) - 1);
+            candidate[sizeof(candidate) - 1] = '\0';
+        }
+    }
+    lua_settop(L, top);
+
+    if (candidate[0] == '\0') {
+        // No avatar yet (main menu, or the story has not populated DB_Avatars).
+        // Leave whatever campaign is current rather than guessing.
+        LOG_LUA_DEBUG("No avatar available; keeping current campaign key");
+        return;
+    }
+
+    uvar_save_all(L);
+    mvar_save_all(L);
+    persist_save_all(L);
+
+    if (campaign_key_set(candidate)) {
+        vars_on_campaign_changed(L);
+        persist_on_campaign_changed(L);
+    }
+}
+
 static void request_deferred_session_init(void) {
     if (s_session_init_state == SESSION_INIT_COMPLETE) {
         // Already complete — on save reload, allow re-init
@@ -5358,6 +5421,16 @@ static bool deferred_session_init_tick(void) {
         staticdata_post_init_capture();
         t1 = (uint64_t)timer_get_monotonic_ms();
         LOG_GAME_INFO("  staticdata_post_init_capture: %llums", (unsigned long long)(t1 - t0));
+
+        // Step 4b: Identify the playthrough and point persisted variables at it.
+        // Mod/user variables are per-campaign (vars/campaign_key.h); before this
+        // ran they were machine-wide, so a new game came up holding another
+        // playthrough's state. Must happen before mod Lua runs in step 5, so
+        // handlers see their own campaign's values.
+        t0 = t1;
+        vars_update_campaign(L);
+        t1 = (uint64_t)timer_get_monotonic_ms();
+        LOG_GAME_INFO("  vars_update_campaign: %llums", (unsigned long long)(t1 - t0));
     } else {
         LOG_GAME_INFO("  Skipped entity/stats/staticdata init (version mismatch)");
     }

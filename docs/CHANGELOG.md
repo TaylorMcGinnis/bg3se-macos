@@ -74,6 +74,31 @@ that field writable.
   set component property". Promoted to a hand-verified layout at the same
   Ghidra-verified offsets, all five fields writable as upstream has them.
 
+- **Persisted variables are per-playthrough.** Mod variables, user variables and
+  PersistentVars were stored in one file per kind for the whole machine, so
+  every campaign shared them; upstream keeps this state in the savegame. A
+  brand-new game came up already holding another playthrough's data (observed
+  2026-09-11: AppearanceEditEnhanced's `OriginCopiedChars` and `CustomNames`
+  carried Karlach entries into a fresh campaign). That is not merely untidy --
+  mods key this state by character UUID and origin UUIDs repeat in every
+  playthrough, so a mod asking "have I already done this to this character" gets
+  the wrong answer.
+
+  Storage is now `modvars/<campaign>.json`, `uservars/<campaign>.json` and
+  `persistentvars/<campaign>/<ModTable>.json`, keyed by the campaign's avatar
+  UUID from Osiris `DB_Avatars`. `Osi.GetHostCharacter()` is deliberately not
+  used: it follows whoever the player currently controls (verified live -- it
+  returned Lae'zel's UUID after switching to her). The key is captured during
+  session load, before mod Lua runs, and the outgoing campaign is flushed before
+  it changes so its pending writes cannot land in the incoming campaign's file.
+  Registered prototypes survive a campaign switch since mods register them once
+  at bootstrap.
+
+  Existing playthroughs are seeded from the old machine-wide files on their
+  first load, per campaign, and nothing is deleted; the legacy files can be
+  removed once every playthrough has been loaded once. With no campaign loaded
+  (main menu) the legacy paths are still used, so nothing written there is lost.
+
 Known gap: `Ext.Types.Serialize` accepts only component and component-array
 userdata, so a root template (a `BG3SE.ResourceObject` proxy, which already has
 layout-driven read/write) is refused. Mods clone templates through

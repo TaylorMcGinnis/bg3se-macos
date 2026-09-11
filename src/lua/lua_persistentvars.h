@@ -93,6 +93,12 @@ void persist_session_reset(void);
  * @param L Lua state
  * @param ext_table_index Stack index of Ext table
  */
+/**
+ * Repoint PersistentVars storage at the current campaign and reload.
+ * Flush the outgoing campaign before changing the campaign key.
+ */
+void persist_on_campaign_changed(lua_State *L);
+
 void lua_persistentvars_register(lua_State *L, int ext_table_index);
 
 // ============================================================================

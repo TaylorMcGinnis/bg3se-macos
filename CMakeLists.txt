@@ -224,6 +224,7 @@ add_library(bg3se SHARED
     src/math/lua_math.c
     src/overlay/overlay.m
     src/vars/user_variables.c
+    src/vars/campaign_key.c
     src/lifetime/lifetime.c
     src/localization/localization.c
     src/lua/lua_localization.c
@@ -411,6 +412,7 @@ if(BUILD_TESTS)
         src/lua/lua_context.c
         src/lua/lua_json.c
         src/lua/lua_persistentvars.c
+        src/vars/campaign_key.c
     )
     target_include_directories(bg3se_test_tier0 PRIVATE
         ${CMAKE_SOURCE_DIR}/tests/tier0

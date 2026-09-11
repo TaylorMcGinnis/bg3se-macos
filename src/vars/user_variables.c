@@ -6,6 +6,7 @@
  */
 
 #include "user_variables.h"
+#include "campaign_key.h"
 #include "../lua/lua_json.h"
 #include "../core/logging.h"
 
@@ -47,24 +48,105 @@ static char g_ModPersistPath[PATH_MAX] = {0};
 // Helper: Get persistence file path
 // ============================================================================
 
+/* Persisted variables are per-playthrough (campaign_key.h). While no campaign
+ * is loaded the legacy machine-wide file is still used, so anything written at
+ * the main menu is not lost; once a campaign is known the per-campaign file
+ * takes over. The cached paths are rebuilt whenever the key changes. */
+static char g_PathsBuiltForKey[CAMPAIGN_KEY_MAX] = {0};
+
+static void persist_paths_invalidate_if_campaign_changed(void) {
+    const char *key = campaign_key_get();
+    const char *current = key ? key : "";
+    if (strncmp(g_PathsBuiltForKey, current, sizeof(g_PathsBuiltForKey) - 1) == 0) {
+        return;
+    }
+    strncpy(g_PathsBuiltForKey, current, sizeof(g_PathsBuiltForKey) - 1);
+    g_PathsBuiltForKey[sizeof(g_PathsBuiltForKey) - 1] = '\0';
+    g_PersistPath[0] = '\0';
+    g_ModPersistPath[0] = '\0';
+}
+
+/* Build "<BG3SE>/<dir>/<campaign>.json", or the legacy "<BG3SE>/<legacy>" when
+ * no campaign is loaded. Creates the per-campaign directory on demand. */
+static void build_persist_path(char *out, size_t out_size,
+                               const char *dir, const char *legacy_name) {
+    const char *home = getenv("HOME");
+    if (!home) return;
+
+    const char *key = campaign_key_get();
+    if (!key) {
+        snprintf(out, out_size, "%s/Library/Application Support/BG3SE/%s",
+                 home, legacy_name);
+        return;
+    }
+
+    char dir_path[PATH_MAX];
+    snprintf(dir_path, sizeof(dir_path),
+             "%s/Library/Application Support/BG3SE/%s", home, dir);
+    mkdir(dir_path, 0755);  // EEXIST is fine
+
+    snprintf(out, out_size, "%s/%s.json", dir_path, key);
+}
+
+/* First time a campaign is seen, seed it from the machine-wide file that
+ * predates per-campaign storage, so an existing playthrough keeps its state.
+ * Done per campaign rather than once overall: entries are keyed by character
+ * UUID and origin UUIDs repeat across playthroughs, so importing into each
+ * campaign preserves behaviour everywhere and they diverge from here on. The
+ * legacy file is left alone; it can be deleted once every playthrough has been
+ * loaded at least once. */
+static void migrate_legacy_store(const char *campaign_path, const char *legacy_name) {
+    if (!campaign_path || campaign_path[0] == '\0') return;
+    if (access(campaign_path, F_OK) == 0) return;  // campaign already has its own
+
+    const char *home = getenv("HOME");
+    if (!home) return;
+
+    char legacy_path[PATH_MAX];
+    snprintf(legacy_path, sizeof(legacy_path),
+             "%s/Library/Application Support/BG3SE/%s", home, legacy_name);
+    if (access(legacy_path, F_OK) != 0) return;
+
+    FILE *src = fopen(legacy_path, "rb");
+    if (!src) return;
+    FILE *dst = fopen(campaign_path, "wb");
+    if (!dst) { fclose(src); return; }
+
+    char buf[8192];
+    size_t n;
+    bool ok = true;
+    while ((n = fread(buf, 1, sizeof(buf), src)) > 0) {
+        if (fwrite(buf, 1, n, dst) != n) { ok = false; break; }
+    }
+    fclose(src);
+    if (fclose(dst) != 0) ok = false;
+
+    if (ok) {
+        LOG_LUA_INFO("Seeded %s for this campaign from %s", campaign_path, legacy_name);
+    } else {
+        LOG_LUA_ERROR("Failed seeding %s from %s", campaign_path, legacy_name);
+        unlink(campaign_path);
+    }
+}
+
 static const char* get_persist_path(void) {
+    persist_paths_invalidate_if_campaign_changed();
     if (g_PersistPath[0] == '\0') {
-        const char *home = getenv("HOME");
-        if (home) {
-            snprintf(g_PersistPath, sizeof(g_PersistPath),
-                     "%s/Library/Application Support/BG3SE/uservars.json", home);
-        }
+        build_persist_path(g_PersistPath, sizeof(g_PersistPath),
+                           "uservars", "uservars.json");
+        migrate_legacy_store(campaign_key_known() ? g_PersistPath : NULL,
+                             "uservars.json");
     }
     return g_PersistPath;
 }
 
 static const char* get_mod_persist_path(void) {
+    persist_paths_invalidate_if_campaign_changed();
     if (g_ModPersistPath[0] == '\0') {
-        const char *home = getenv("HOME");
-        if (home) {
-            snprintf(g_ModPersistPath, sizeof(g_ModPersistPath),
-                     "%s/Library/Application Support/BG3SE/modvars.json", home);
-        }
+        build_persist_path(g_ModPersistPath, sizeof(g_ModPersistPath),
+                           "modvars", "modvars.json");
+        migrate_legacy_store(campaign_key_known() ? g_ModPersistPath : NULL,
+                             "modvars.json");
     }
     return g_ModPersistPath;
 }
@@ -1344,6 +1426,48 @@ void mvar_save_all(lua_State *L) {
     }
 
     lua_pop(L, 2);  // Pop JSON string and root table
+}
+
+/* Switch persisted variables to a different playthrough.
+ *
+ * Values are dropped and reloaded from the new campaign's store; prototypes are
+ * kept, because mods register those once during bootstrap and will not do it
+ * again when a campaign changes. The caller must flush the previous campaign's
+ * data BEFORE changing the key, or the pending write lands in the new
+ * campaign's file. */
+void vars_on_campaign_changed(lua_State *L) {
+    if (!g_Initialized) uvar_init();
+
+    for (int i = 0; i < g_ModCount; i++) {
+        if (g_Mods[i].vars) {
+            for (int j = 0; j < g_Mods[i].var_count; j++) {
+                free_variable(&g_Mods[i].vars[j]);
+            }
+            free(g_Mods[i].vars);
+            g_Mods[i].vars = NULL;
+        }
+        g_Mods[i].var_count = 0;
+        g_Mods[i].dirty = false;
+    }
+    g_ModsDirty = false;
+
+    for (int i = 0; i < g_EntityCount; i++) {
+        if (g_Entities[i].vars) {
+            for (int j = 0; j < g_Entities[i].var_count; j++) {
+                free_variable(&g_Entities[i].vars[j]);
+            }
+            free(g_Entities[i].vars);
+            g_Entities[i].vars = NULL;
+        }
+        g_Entities[i].var_count = 0;
+    }
+    g_EntityCount = 0;
+    g_Dirty = false;
+
+    mvar_cache_clear(L);
+
+    uvar_load_all(L);
+    mvar_load_all(L);
 }
 
 void mvar_load_all(lua_State *L) {
