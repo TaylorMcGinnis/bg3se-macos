@@ -1122,11 +1122,64 @@ static const ComponentLayoutDef g_AttributeBoostComponent_Layout = {
 // Note: Contains two TranslatedStrings (complex - handle + version = ~32 bytes each)
 // ============================================================================
 
+/* RuntimeStringHandle { FixedString Handle; uint16 Version; } -- 0x10 here, not
+ * the 8 the two members imply: DisplayNameComponent is 0x40 with its second
+ * TranslatedString at 0x20, so each TranslatedString is 0x20 and each of its
+ * two handles 0x10. */
+static const ComponentPropertyDef g_RuntimeStringHandle_Properties[] = {
+    { "Handle",  0x00, FIELD_TYPE_FIXEDSTRING, 0, false },
+    { "Version", 0x04, FIELD_TYPE_UINT16,      0, false },
+};
+
+static const ComponentLayoutDef g_RuntimeStringHandle_Layout = {
+    .componentName = "RuntimeStringHandle",
+    .shortName = "RuntimeStringHandle",
+    .componentTypeIndex = 0,
+    .componentSize = 0x10,
+    .properties = g_RuntimeStringHandle_Properties,
+    .propertyCount = sizeof(g_RuntimeStringHandle_Properties) / sizeof(g_RuntimeStringHandle_Properties[0]),
+};
+
+/* TranslatedString { RuntimeStringHandle Handle; RuntimeStringHandle ArgumentString; } */
+static const ComponentPropertyDef g_TranslatedString_Properties[] = {
+    { "Handle",         0x00, FIELD_TYPE_STRUCT, 0, false, ELEM_TYPE_UNKNOWN, 0,
+      .structLayout = &g_RuntimeStringHandle_Layout },
+    { "ArgumentString", 0x10, FIELD_TYPE_STRUCT, 0, false, ELEM_TYPE_UNKNOWN, 0,
+      .structLayout = &g_RuntimeStringHandle_Layout },
+};
+
+static const ComponentLayoutDef g_TranslatedString_Layout = {
+    .componentName = "TranslatedString",
+    .shortName = "TranslatedString",
+    .componentTypeIndex = 0,
+    .componentSize = 0x20,
+    .properties = g_TranslatedString_Properties,
+    .propertyCount = sizeof(g_TranslatedString_Properties) / sizeof(g_TranslatedString_Properties[0]),
+};
+
+/* Upstream is `TranslatedString Name` (legacy NameKey) then `TranslatedString
+ * Title` (legacy UnknownKey), and mods reach the localisation handle through
+ * the nested path -- Norbyte's own API docs show
+ * `entity.DisplayName.NameKey.Handle.Handle`. Only the two flat FixedStrings
+ * were exposed here, so that path was nil and mods relying on it broke:
+ * VolitionCabinet, a library several mods build on, raised "attempt to index a
+ * nil value (field 'NameKey')" four times a frame for an entire session.
+ *
+ * Both the modern and legacy names are offered at the same offsets, since mods
+ * in the wild use either. The flat NameHandle/TitleHandle accessors this port
+ * already had are kept so existing callers keep working. */
 static const ComponentPropertyDef g_DisplayNameComponent_Properties[] = {
-    // TranslatedString Name at 0x00 (Handle + Version = ~32 bytes on ARM64)
-    { "NameHandle",   0x00, FIELD_TYPE_FIXEDSTRING, 0, false },  // TranslatedString.Handle
-    // TranslatedString Title at 0x20
-    { "TitleHandle",  0x20, FIELD_TYPE_FIXEDSTRING, 0, false },  // TranslatedString.Handle
+    { "Name",         0x00, FIELD_TYPE_STRUCT, 0, false, ELEM_TYPE_UNKNOWN, 0,
+      .structLayout = &g_TranslatedString_Layout },
+    { "NameKey",      0x00, FIELD_TYPE_STRUCT, 0, false, ELEM_TYPE_UNKNOWN, 0,
+      .structLayout = &g_TranslatedString_Layout },   // upstream legacy name
+    { "Title",        0x20, FIELD_TYPE_STRUCT, 0, false, ELEM_TYPE_UNKNOWN, 0,
+      .structLayout = &g_TranslatedString_Layout },
+    { "UnknownKey",   0x20, FIELD_TYPE_STRUCT, 0, false, ELEM_TYPE_UNKNOWN, 0,
+      .structLayout = &g_TranslatedString_Layout },   // upstream legacy name
+    // Flat accessors kept for compatibility with existing callers.
+    { "NameHandle",   0x00, FIELD_TYPE_FIXEDSTRING, 0, false },
+    { "TitleHandle",  0x20, FIELD_TYPE_FIXEDSTRING, 0, false },
 };
 
 static const ComponentLayoutDef g_DisplayNameComponent_Layout = {

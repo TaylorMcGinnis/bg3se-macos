@@ -1882,12 +1882,30 @@ static void *remove_component_fn_for(const char *component_name) {
     /* Recorded VAs assume the nominal 0x100000000 image base. */
     uintptr_t slide = (uintptr_t)base - 0x100000000ull;
 
-#define REMOVE_COMPONENT_ENTRY(name, va) \
-    if (strcmp(component_name, (name)) == 0) { \
-        return (void *)((uintptr_t)(va) + slide); \
+    /* The table is keyed on engine class names ("eoc::CustomNameComponent"),
+     * but mods pass the Lua-facing short name ("CustomName") -- that is what
+     * every other entity API here takes, and what upstream accepts. Matching
+     * only the class name meant entity:RemoveComponent("CustomName") found no
+     * specialization, returned false and silently did nothing; the false was
+     * easy to miss because the call raises nothing. Try the name as given, then
+     * again resolved through the upstream name table. */
+    const char *candidates[2];
+    int candidateCount = 0;
+    candidates[candidateCount++] = component_name;
+    const char *className = component_upstream_name_to_class(component_name);
+    if (className && strcmp(className, component_name) != 0) {
+        candidates[candidateCount++] = className;
     }
-    GENERATED_REMOVE_COMPONENT_ENTRIES(REMOVE_COMPONENT_ENTRY)
+
+    for (int i = 0; i < candidateCount; i++) {
+        const char *lookup = candidates[i];
+#define REMOVE_COMPONENT_ENTRY(name, va) \
+        if (strcmp(lookup, (name)) == 0) { \
+            return (void *)((uintptr_t)(va) + slide); \
+        }
+        GENERATED_REMOVE_COMPONENT_ENTRIES(REMOVE_COMPONENT_ENTRY)
 #undef REMOVE_COMPONENT_ENTRY
+    }
 
     return NULL;
 }

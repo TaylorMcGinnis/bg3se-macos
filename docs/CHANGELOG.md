@@ -126,6 +126,23 @@ that field writable.
   `Abilities` decoded the string's bytes as integers. Verified live: Name reads
   the character-creation name and Abilities reads plausible values.
 
+- **`DisplayName` exposes upstream's nested shape.** Upstream is
+  `TranslatedString Name` (legacy `NameKey`) then `Title` (legacy
+  `UnknownKey`), each two `RuntimeStringHandle`s, and mods reach the handle as
+  `entity.DisplayName.NameKey.Handle.Handle` -- the form in Norbyte's own API
+  docs. Only two flat FixedStrings were exposed, so that path was nil and mods
+  using it broke: VolitionCabinet, a library several mods build on, raised
+  "attempt to index a nil value (field 'NameKey')" four times a frame for a
+  whole session. Both modern and legacy names are offered at the same offsets;
+  the flat `NameHandle`/`TitleHandle` accessors are kept for existing callers.
+  Verified live -- the nested path resolves and VolitionCabinet's error stopped.
+- **`entity:RemoveComponent` accepts short names.** The specialization table is
+  keyed on engine class names, but mods pass the Lua-facing short name, as every
+  other entity API here takes and as upstream accepts. `RemoveComponent("CustomName")`
+  therefore found nothing, returned false and silently did nothing -- easy to
+  miss, since it raises no error. Short names now resolve through the upstream
+  name table before lookup.
+
 Known gap: `Ext.Types.Serialize` accepts only component and component-array
 userdata, so a root template (a `BG3SE.ResourceObject` proxy, which already has
 layout-driven read/write) is refused. Mods clone templates through
