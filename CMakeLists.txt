@@ -225,6 +225,7 @@ add_library(bg3se SHARED
     src/overlay/overlay.m
     src/vars/user_variables.c
     src/vars/campaign_key.c
+    src/osiris/osi_call_guard.cpp
     src/lifetime/lifetime.c
     src/localization/localization.c
     src/lua/lua_localization.c

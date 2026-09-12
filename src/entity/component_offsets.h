@@ -2952,14 +2952,28 @@ static const ComponentLayoutDef g_eoc_CarryCapacityMultiplierBoostComponent_Layo
 };
 
 // eoc::CharacterCreationStatsComponent - 88 bytes (0x58)
-// Source: CharacterCreationStatsComponent from Windows BG3SE
+//
+// Upstream (Components/Data.h:165) is:
+//   Guid Race; Guid SubRace; uint8 BodyType; uint8 BodyShape;
+//   STDString Name; std::array<int32,7> Abilities; uint8 field_5C;
+//
+// Name was missing here entirely and Abilities sat at 0x24, overlapping where
+// the string actually lives -- so `entity.CharacterCreationStats.Name`, which
+// mods do read (AppearanceEditEnhanced logs it in its Restore path), came back
+// nil, and Abilities read the string's bytes as integers.
+//
+// STDString is 16 bytes on this build (core/stdstring.h), not the 24/32 a
+// std::basic_string would imply, so Name is at 0x28 once BodyShape's tail is
+// padded to 8, Abilities follows at 0x38, and field_5C lands at 0x54 inside the
+// 0x58 the component occupies.
 static const ComponentPropertyDef g_eoc_CharacterCreationStatsComponent_Properties[] = {
     { "Race", 0x00, FIELD_TYPE_GUID, 0, false },
     { "SubRace", 0x10, FIELD_TYPE_GUID, 0, false },
     { "BodyType", 0x20, FIELD_TYPE_UINT8, 0, false },
     { "BodyShape", 0x21, FIELD_TYPE_UINT8, 0, false },
-    { "Abilities", 0x24, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
-    { "field_5C", 0x34, FIELD_TYPE_UINT8, 0, false },
+    { "Name", 0x28, FIELD_TYPE_STDSTRING, 0, false },
+    { "Abilities", 0x38, FIELD_TYPE_INT32_ARRAY, 7, false },
+    { "field_5C", 0x54, FIELD_TYPE_UINT8, 0, false },
 };
 static const ComponentLayoutDef g_eoc_CharacterCreationStatsComponent_Layout = {
     .componentName = "eoc::CharacterCreationStatsComponent",

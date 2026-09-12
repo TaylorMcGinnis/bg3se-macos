@@ -99,6 +99,33 @@ that field writable.
   removed once every playthrough has been loaded once. With no campaign loaded
   (main menu) the legacy paths are still used, so nothing written there is lost.
 
+- **Osiris can no longer abort the session by rejecting a tuple.** Osiris signals
+  a tuple it will not accept by throwing a C++ exception. Every frame between
+  that throw and the Lua entry point was C, so there was nothing to unwind
+  through and no handler to find: the runtime went straight to `std::terminate`
+  and killed the game (observed 2026-09-11 -- an `Osi.<name>` call for a
+  function the engine id cache did not hold was routed into the story
+  tuple-insert path and the game died with SIGABRT). The call now crosses a C++
+  exception barrier (`src/osiris/osi_call_guard.cpp`, the only C++ in the port)
+  and a rejection becomes a Lua error naming the function and column count
+  instead of an abort. Validation in front of the insert was already strict --
+  node resolution, signature read, arity and per-argument type checks all raise
+  before the engine sees anything -- so what remained was the engine's own
+  assertions about state we cannot inspect from outside.
+
+  Two supporting changes: the function name, column count and node kind are
+  logged immediately before entering the engine (the log is line buffered, so
+  the line survives an abort -- the crash that prompted this could not be
+  attributed to a function at all), and `BG3SE_NO_STORY_INSERT=1` turns every
+  story dispatch into a clean Lua error for bisecting.
+- **`CharacterCreationStats.Name` is readable.** Upstream has `STDString Name`
+  between `BodyShape` and `Abilities`; it was missing here entirely and
+  `Abilities` sat at 0x24, overlapping where the string lives -- so
+  `entity.CharacterCreationStats.Name`, which mods read
+  (AppearanceEditEnhanced logs it in its Restore path), came back nil and
+  `Abilities` decoded the string's bytes as integers. Verified live: Name reads
+  the character-creation name and Abilities reads plausible values.
+
 Known gap: `Ext.Types.Serialize` accepts only component and component-array
 userdata, so a root template (a `BG3SE.ResourceObject` proxy, which already has
 layout-driven read/write) is refused. Mods clone templates through

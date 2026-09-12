@@ -60,6 +60,7 @@ extern "C" {
 
 // Osiris modules
 #include "osiris_types.h"
+#include "../osiris/osi_call_guard.h"
 #include "osiris_functions.h"
 #include "custom_functions.h"
 #include "pattern_scan.h"
@@ -3224,7 +3225,18 @@ static int osi_node_insert_tuple(lua_State *L, const char *name, void *node, voi
             return luaL_error(L, "Osi.%s: node Add() unreadable; the call did not "
                                  "reach Osiris", name);
         }
-        ((void (*)(void *, void *))addFn)(node, list);
+        /* Through the C++ exception barrier: Osiris signals a tuple it will not
+         * accept by throwing, and with only C frames between here and Lua that
+         * would unwind into std::terminate and abort the whole session rather
+         * than failing this one call. */
+        char engineErr[256] = {0};
+        if (!osi_guarded_node_call((void (*)(void *, void *))addFn, node, list,
+                                   engineErr, sizeof(engineErr))) {
+            osi_tuple_destroy(&tuple);
+            return luaL_error(L, "Osi.%s: Osiris rejected the %d-column tuple (%s); "
+                                 "no engine state changed",
+                              name, (int)count, engineErr);
+        }
 
         LOG_OSIRIS_DEBUG("Osi.%s: dispatched via node Add() (%u args, %s)",
                          name, count, db ? "database" : "proc/event");
@@ -3250,7 +3262,31 @@ static int osi_node_insert_tuple(lua_State *L, const char *name, void *node, voi
  * `firstArg` is the stack index of the first argument.
  * Returns 0 (no results) on success, or raises a Lua error.
  */
+/* Escape hatch for the tuple-insert path. A tuple the engine rejects aborts the
+ * process (see the note before the insert below), so BG3SE_NO_STORY_INSERT=1
+ * turns every story dispatch into a clean Lua error instead. Mods that depend on
+ * database inserts or PROC calls stop working, but the session survives, which
+ * is the right trade while hunting a reproducer. */
+static bool osi_story_insert_disabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char *v = getenv("BG3SE_NO_STORY_INSERT");
+        cached = (v && *v && *v != '0') ? 1 : 0;
+        if (cached) {
+            LOG_OSIRIS_INFO("BG3SE_NO_STORY_INSERT is set: story tuple inserts "
+                            "are disabled and will raise instead");
+        }
+    }
+    return cached == 1;
+}
+
 static int osi_story_insert(lua_State *L, const char *name, void *def, int firstArg) {
+    if (osi_story_insert_disabled()) {
+        return luaL_error(L, "Osi.%s: story inserts are disabled by "
+                             "BG3SE_NO_STORY_INSERT; the call did not reach Osiris",
+                          name);
+    }
+
     void *node = NULL, *db = NULL;
     uint8_t colCount = 0;
     bool isDb = osi_db_resolve(def, &node, &db, &colCount);
@@ -3298,6 +3334,16 @@ static int osi_story_insert(lua_State *L, const char *name, void *def, int first
                           name, (int)colCount, nargs);
     }
     osi_check_arg_kinds(L, name, firstArg, colCount, types);
+
+    /* Name the call BEFORE entering the engine. A tuple the engine rejects
+     * raises a C++ exception, and nothing in this C path can catch it: it
+     * unwinds into std::terminate and aborts the process with no breadcrumb
+     * (observed 2026-09-11 -- the crash report showed only osi_story_insert and
+     * the log's last line was an unrelated cache refresh, so the offending
+     * function could not be identified). The log is line buffered, so this line
+     * survives the abort and names the culprit. */
+    LOG_OSIRIS_INFO("Osi.%s: inserting %d-column tuple into its %s node",
+                    name, (int)colCount, db ? "database" : "story");
 
     return osi_node_insert_tuple(L, name, node, db, colCount, types, firstArg);
 }
