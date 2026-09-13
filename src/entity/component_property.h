@@ -102,6 +102,7 @@ typedef enum {
     ELEM_TYPE_UINT16,           // Plain integers (HashMap<uint16_t, ...> keys,
     ELEM_TYPE_INT32,            // Array<int32_t>): pushed as Lua integers
     ELEM_TYPE_UINT32,
+    ELEM_TYPE_UINT64,          // Array<uint64_t> (e.g. TurnOrder indices)
     ELEM_TYPE_FLOAT,            // Array<float>
 } ArrayElementType;
 

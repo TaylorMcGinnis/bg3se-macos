@@ -703,6 +703,7 @@ static bool plain_array_elem_writable(const ComponentPropertyDef *prop) {
         case ELEM_TYPE_ENTITY_HANDLE: return prop->elemSize == sizeof(uint64_t);
         case ELEM_TYPE_FIXED_STRING:  return prop->elemSize == sizeof(uint32_t);
         case ELEM_TYPE_FLOAT:         return prop->elemSize == sizeof(float);
+        case ELEM_TYPE_UINT64:        return prop->elemSize == sizeof(uint64_t);
         case ELEM_TYPE_STRUCT:        return struct_elem_is_pod(prop->structLayout);
         default:                      return false;
     }
@@ -2127,6 +2128,16 @@ static int array_proxy_push_element(lua_State *L, ArrayProxy *proxy, void *buf, 
             if (safe_memory_read_u32((mach_vm_address_t)elemAddr, &raw)) {
                 float f; memcpy(&f, &raw, sizeof(f));
                 lua_pushnumber(L, (lua_Number)f);
+            } else {
+                lua_pushnil(L);
+            }
+            return 1;
+        }
+
+        case ELEM_TYPE_UINT64: {
+            uint64_t val = 0;
+            if (safe_memory_read((mach_vm_address_t)elemAddr, &val, sizeof(val))) {
+                lua_pushinteger(L, (lua_Integer)val);
             } else {
                 lua_pushnil(L);
             }

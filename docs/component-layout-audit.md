@@ -32,9 +32,8 @@ A `FIELD_TYPE_DYNAMIC_ARRAY` with no element type reads as an empty proxy —
 `#arr` works, `arr[i]` is nil — so the contents are invisible to mods and there
 is no error to notice. This is exactly what hid `DisplayNameList.Names`.
 
-Fixed in this pass (element type taken from upstream's declaration; sizes are
-fixed and certain, though no populated instance was available to verify element
-decoding live):
+Fixed so far (element type taken from upstream's declaration; sizes fixed and
+certain, or a struct layout already verified live):
 
 | Component | Field | Upstream | Element |
 |---|---|---|---|
@@ -42,6 +41,44 @@ decoding live):
 | `eoc::god::TagComponent` | `Tags` | `Array<Guid>` | GUID/16 |
 | `eoc::combat::IsThreatenedComponent` | `ThreatenedBy` | `Array<EntityHandle>` | HANDLE/8 |
 | `eoc::ObjectInteractionComponent` | `Interactions` | `Array<EntityHandle>` | HANDLE/8 |
+| `eoc::lock::LockComponent` | `field_18` | `Array<Guid>` | GUID/16 |
+| `esv::inventory::ShapeshiftEquipmentHistoryComponent` | `History` | `Array<Guid>` | GUID/16 |
+| `eoc::action::ActionUseConditionsComponent` | `Conditions` | `Array<int32_t>` | INT32/4 |
+| `eoc::TurnOrderComponent` | `TurnOrderIndices`, `TurnOrderIndices2` | `Array<uint64_t>` | UINT64/8 (element type added) |
+| `eoc::spell::CCPrepareSpellComponent` | `Spells` | `Array<SpellMetaId>` | STRUCT/0x30 **verified live** |
+| `eoc::spell::PlayerPrepareSpellComponent` | `Spells` | `Array<SpellMetaId>` | STRUCT/0x30 **verified live** |
+
+Only the two `SpellMetaId` arrays had a populated instance to check: both read 5
+entries with `[1].OriginatorPrototype = "Target_Sanctuary"`. The others read
+their array headers correctly but their element decoding is inferred from
+upstream's declaration, not observed.
+
+### Still to do, needing a MEASURED stride
+
+Each needs a struct layout plus the element stride established live (expose the
+raw buffer and count, hex dump, find where the next element's header repeats,
+confirm on two entities):
+`BoostDescription` (4 uses), `IconInfo`, `AnimationTag`, `LevelUpData`,
+`SurfacePathInfluence`, `BaseWeaponDamage`, `ActivationGroupData`,
+`stats::Requirement`, `SpellMeta`, `AnimationWaterfallElement`, `State`.
+
+### Still to do, element type unknown
+
+Upstream does not declare these where a header search could find them, so they
+need a wider search or disassembly: `esv::ChasmDataComponent.Data`,
+`esv::ConstellationHelperComponent.Data`, `esv::InterruptDataComponent.Data`,
+`esv::InventoryOwnerComponent.Inventories`, both ping singletons' `Requests`,
+`esv::SummonContainerComponent.Summons`, `ls::trigger::IsInsideOfComponent.Triggers`,
+`ls::uuid::ToHandleMappingComponent.Mappings`, the two animation request
+components, `eoc::spell::BookCooldownsComponent.Cooldowns`,
+`eoc::WeaponDamageResistanceBoostComponent.DamageTypes`,
+`eoc::DifficultyCheckComponent.Abilities`/`field_30`,
+`eoc::ACOverrideFormulaBoostComponent.AddAbilityModifiers`.
+
+### Not arrays -- do not type as such
+
+`esv::BaseDataComponent.Resistances` is a fixed `std::array<std::array<...,7>,2>`;
+`esv::CustomStatsComponent.Stats` is a `LegacyMap<FixedString,int>`.
 
 Still opaque, with upstream's declared element type where known. Those needing a
 struct layout also need the stride MEASURED live — upstream's legacy `field_NN`

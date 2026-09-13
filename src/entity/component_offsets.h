@@ -3972,8 +3972,8 @@ static const ComponentLayoutDef g_eoc_StealthComponent_Layout = {
 // eoc::TurnOrderComponent - 80 bytes (0x50)
 // Source: TurnOrderComponent from Windows BG3SE
 static const ComponentPropertyDef g_eoc_TurnOrderComponent_Properties[] = {
-    { "TurnOrderIndices", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
-    { "TurnOrderIndices2", 0x10, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "TurnOrderIndices", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_UINT64, 8 },
+    { "TurnOrderIndices2", 0x10, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_UINT64, 8 },
     { "field_40", 0x20, FIELD_TYPE_INT32, 0, false },
     { "field_44", 0x24, FIELD_TYPE_INT32, 0, false },
     { "field_48", 0x28, FIELD_TYPE_INT32, 0, false },
@@ -4193,7 +4193,7 @@ static const ComponentLayoutDef g_eoc_WeightCategoryBoostComponent_Layout = {
 // eoc::action::ActionUseConditionsComponent - 16 bytes (0x10)
 // Source: ActionUseConditionsComponent from Windows BG3SE
 static const ComponentPropertyDef g_eoc_ActionUseConditionsComponent_Properties[] = {
-    { "Conditions", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "Conditions", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_INT32, 4 },
 };
 static const ComponentLayoutDef g_eoc_ActionUseConditionsComponent_Layout = {
     .componentName = "eoc::action::ActionUseConditionsComponent",
@@ -4529,7 +4529,7 @@ static const ComponentPropertyDef g_eoc_LockComponent_Properties[] = {
     { "Key_M", 0x00, FIELD_TYPE_FIXEDSTRING, 0, false },
     { "LockDC", 0x04, FIELD_TYPE_INT32, 0, false },
     { "field_8", 0x08, FIELD_TYPE_GUID, 0, false },
-    { "field_18", 0x18, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "field_18", 0x18, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_GUID, 16 },
 };
 static const ComponentLayoutDef g_eoc_LockComponent_Layout = {
     .componentName = "eoc::lock::LockComponent",
@@ -4586,7 +4586,8 @@ static const ComponentLayoutDef g_eoc_BookCooldownsComponent_Layout = {
 // eoc::spell::CCPrepareSpellComponent - 16 bytes (0x10)
 // Source: CCPrepareSpellComponent from Windows BG3SE
 static const ComponentPropertyDef g_eoc_CCPrepareSpellComponent_Properties[] = {
-    { "Spells", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "Spells", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_STRUCT, 0x30,
+      .structLayout = &g_SpellMetaId_Layout },
 };
 static const ComponentLayoutDef g_eoc_CCPrepareSpellComponent_Layout = {
     .componentName = "eoc::spell::CCPrepareSpellComponent",
@@ -4600,7 +4601,8 @@ static const ComponentLayoutDef g_eoc_CCPrepareSpellComponent_Layout = {
 // eoc::spell::PlayerPrepareSpellComponent - 24 bytes (0x18)
 // Source: PlayerPrepareSpellComponent from Windows BG3SE
 static const ComponentPropertyDef g_eoc_PlayerPrepareSpellComponent_Properties[] = {
-    { "Spells", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "Spells", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_STRUCT, 0x30,
+      .structLayout = &g_SpellMetaId_Layout },
 };
 static const ComponentLayoutDef g_eoc_PlayerPrepareSpellComponent_Layout = {
     .componentName = "eoc::spell::PlayerPrepareSpellComponent",
@@ -6164,7 +6166,7 @@ static const ComponentLayoutDef g_esv_inventory_ShapeshiftAddedEquipmentComponen
 // esv::inventory::ShapeshiftEquipmentHistoryComponent - 16 bytes (0x10)
 // Source: Inventory.h
 static const ComponentPropertyDef g_esv_inventory_ShapeshiftEquipmentHistoryComponent_Properties[] = {
-    { "History", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "History", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_GUID, 16 },
 };
 static const ComponentLayoutDef g_esv_inventory_ShapeshiftEquipmentHistoryComponent_Layout = {
     .componentName = "esv::inventory::ShapeshiftEquipmentHistoryComponent",
