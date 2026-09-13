@@ -14,6 +14,7 @@
 #include "../core/offset_table.h"
 #include "../core/safe_memory.h"
 #include "../core/stdstring.h"
+#include "../template/template_layouts.h"
 #include "../core/logging.h"
 
 #include <lauxlib.h>
@@ -1819,3 +1820,5 @@ void lua_resource_object_push(lua_State *L, void *obj, const char *type_name) {
     selftest_layout_once(layout);
     push_object_proxy(L, obj, layout);
 }
+
+#include "lua_resource_object_serialize.inc"

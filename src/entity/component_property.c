@@ -2658,6 +2658,14 @@ static bool serialize_proxy_at(lua_State *L, int index, int depth) {
         return true;
     }
 
+    /* Root templates and static-data objects are resource-object proxies, not
+     * component proxies. Mods clone templates through Serialize/Unserialize
+     * (upstream's TryToReserializeObject), so refusing them made that clone a
+     * silent no-op inside the caller's xpcall. */
+    if (lua_resource_object_serialize(L, absoluteIndex)) {
+        return true;
+    }
+
     ArrayProxy *array = (ArrayProxy *)luaL_testudata(
         L, absoluteIndex, ARRAY_PROXY_METATABLE);
     if (array) {
@@ -2697,7 +2705,9 @@ bool component_property_unserialize_proxy(lua_State *L, int proxyIndex,
     ComponentProxy *component = (ComponentProxy *)luaL_testudata(
         L, absoluteProxy, COMPONENT_PROXY_METATABLE);
     if (!component) {
-        return false;
+        /* Resource-object proxy (root template / static data) -- see the note
+         * in serialize_proxy_at. */
+        return lua_resource_object_unserialize(L, absoluteProxy, absoluteTable);
     }
 
     if (!lifetime_lua_is_valid(L, component->lifetime)) {

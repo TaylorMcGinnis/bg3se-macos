@@ -154,11 +154,26 @@ that field writable.
   `TranslatedString` size than this build uses. Element+0x10 is exposed as
   `Priority`; it is a selector where the lowest value wins.
 
-Known gap: `Ext.Types.Serialize` accepts only component and component-array
-userdata, so a root template (a `BG3SE.ResourceObject` proxy, which already has
-layout-driven read/write) is refused. Mods clone templates through
-Serialize/Unserialize inside an `xpcall` and discard the error, so this fails
-silently rather than reporting.
+- **`Ext.Types.Serialize` accepts root templates and static-data objects.** They
+  are `BG3SE.ResourceObject` proxies, not component proxies, so Serialize
+  refused them -- and mods clone templates through Serialize/Unserialize inside
+  an `xpcall` that discards the error, so AppearanceEditEnhanced's `Main.lua:217`
+  template clone has never once run on this port. Both directions go through the
+  proxy's own `__index`/`__newindex`, so existing conversions, bounds checks and
+  read-only rules apply. Scalar fields only; arrays and nested structs are
+  skipped, as writing them back needs ownership operations this layer cannot
+  perform.
+
+  **Unserialize refuses a shared root template** -- a deliberate divergence.
+  `entity.ServerCharacter.Template` is the template bank's own object, not a
+  per-character copy, so writing it changes every character using that template
+  for the rest of the process; verified by doing it accidentally, which left two
+  origins and `Ext.Template.GetRootTemplate` for both GUIDs reporting the same
+  template until a full relaunch. Upstream permits the write; the damage here is
+  process-wide, silent and survives a save reload, so it is refused with an
+  explanatory error. Per-instance templates (what a character-creation copy
+  carries) are not in the bank and still clone normally, which is what mods
+  need.
 
 ## v0.47.4 (2026-09-09)
 

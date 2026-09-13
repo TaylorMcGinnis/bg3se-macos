@@ -32,4 +32,20 @@ struct ResourceLayout;
  */
 void lua_resource_object_push_layout(lua_State *L, void *obj, const struct ResourceLayout *layout);
 
+/**
+ * Ext.Types.Serialize / Unserialize for resource-object proxies (root
+ * templates and static-data objects).
+ *
+ * Scalar fields only; arrays and nested structs are skipped, as writing them
+ * back needs ownership operations this layer cannot perform. Both go through
+ * the proxy's own __index / __newindex, so the resource layer's conversions and
+ * read-only rules apply. Unserialize may raise out of __newindex for a refused
+ * field, as the component path does.
+ *
+ * Return false when the value is not a resource-object proxy, so callers can
+ * fall through to other proxy kinds.
+ */
+bool lua_resource_object_serialize(lua_State *L, int index);
+bool lua_resource_object_unserialize(lua_State *L, int objIndex, int tableIndex);
+
 #endif // BG3SE_LUA_RESOURCE_OBJECT_H
