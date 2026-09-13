@@ -80,49 +80,6 @@ components, `eoc::spell::BookCooldownsComponent.Cooldowns`,
 `esv::BaseDataComponent.Resistances` is a fixed `std::array<std::array<...,7>,2>`;
 `esv::CustomStatsComponent.Stats` is a `LegacyMap<FixedString,int>`.
 
-Still opaque, with upstream's declared element type where known. Those needing a
-struct layout also need the stride MEASURED live — upstream's legacy `field_NN`
-names imply sizes this build does not use, and have misled this port before:
-
-| Component | Field | Upstream element |
-|---|---|---|
-| `eoc::spell::CCPrepareSpellComponent` | `Spells` | `SpellMetaId` (layout exists: `g_SpellMetaId_Layout`, stride 0x30) |
-| `eoc::spell::PlayerPrepareSpellComponent` | `Spells` | `SpellMetaId` (same) |
-| `eoc::spell::AddedSpellsComponent` | `Spells` | `SpellMeta` |
-| `eoc::spell::BookCooldownsComponent` | `Cooldowns` | ? |
-| `eoc::TurnOrderComponent` | `TurnOrderIndices`, `TurnOrderIndices2` | `Array<uint64_t>` (no UINT64 element type yet) |
-| `eoc::UseComponent` | `Requirements`, `Boosts`, `BoostsOnEquipMainHand`, `BoostsOnEquipOffHand` | ? |
-| `eoc::UseBoostsComponent` | `Boosts` | `BoostDescription` |
-| `eoc::ACOverrideFormulaBoostComponent` | `AddAbilityModifiers` | ? |
-| `eoc::DifficultyCheckComponent` | `Abilities`, `field_30` | ? |
-| `eoc::WeaponDamageResistanceBoostComponent` | `DamageTypes` | ? |
-| `eoc::action::ActionUseConditionsComponent` | `Conditions` | ? |
-| `eoc::character_creation::LevelUpComponent` | `LevelUps` | ? |
-| `eoc::lock::LockComponent` | `field_18` | ? |
-| `esv::StatesComponent` | `States` | `State` (shapeshift; large, optional-heavy) |
-| `esv::ActivationGroupContainerComponent` | `Groups` | ? |
-| `esv::BaseDataComponent` | `Resistances` | ? |
-| `esv::BaseWeaponComponent` | `DamageList` | ? |
-| `esv::ChasmDataComponent` | `Data` | ? |
-| `esv::ConstellationHelperComponent` | `Data` | ? |
-| `esv::CustomStatsComponent` | `Stats` | `LegacyMap<FixedString,int>` (not an array) |
-| `esv::IconListComponent` | `Icons` | `IconInfo` |
-| `esv::InterruptDataComponent` | `Data` | ? |
-| `esv::InventoryOwnerComponent` | `Inventories` | ? |
-| `esv::OsirisPingRequestSingletonComponent` | `Requests` | ? |
-| `esv::PingRequestSingletonComponent` | `Requests` | ? |
-| `esv::SummonContainerComponent` | `Summons` | ? |
-| `esv::SurfacePathInfluencesComponent` | `PathInfluences` | ? |
-| `esv::inventory::ShapeshiftAddedEquipmentComponent` | `Equipment` | ? |
-| `esv::inventory::ShapeshiftEquipmentHistoryComponent` | `History` | ? |
-| `esv::inventory::ShapeshiftUnequippedEquipmentComponent` | `Equipment` | ? |
-| `ls::animation::DynamicAnimationTagsComponent` | `Tags` | `AnimationTag` |
-| `ls::animation::LoadAnimationSetGameplayRequestOneFrameComponent` | `Animations` | ? |
-| `ls::animation::RemoveAnimationSetsGameplayRequestOneFrameComponent` | `AnimationSets` | ? |
-| `ls::animation::TemplateAnimationSetOverrideComponent` | `Overrides` | ? |
-| `ls::trigger::IsInsideOfComponent` | `Triggers` | ? |
-| `ls::uuid::ToHandleMappingComponent` | `Mappings` | ? |
-
 ## How to measure a struct element's stride
 
 Expose the array's raw buffer and count read-only (`buf @0x00`, `size @0x0c`),
