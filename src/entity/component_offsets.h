@@ -3695,7 +3695,7 @@ static const ComponentLayoutDef g_eoc_NullifyAbilityBoostComponent_Layout = {
 // eoc::ObjectInteractionComponent - 16 bytes (0x10)
 // Source: ObjectInteractionComponent from Windows BG3SE
 static const ComponentPropertyDef g_eoc_ObjectInteractionComponent_Properties[] = {
-    { "Interactions", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "Interactions", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_ENTITY_HANDLE, 8 },
 };
 static const ComponentLayoutDef g_eoc_ObjectInteractionComponent_Layout = {
     .componentName = "eoc::ObjectInteractionComponent",
@@ -4052,7 +4052,7 @@ static const ComponentLayoutDef g_eoc_VoiceComponent_Layout = {
 // eoc::VoiceTagComponent - 16 bytes (0x10)
 // Source: VoiceTagComponent from Windows BG3SE
 static const ComponentPropertyDef g_eoc_VoiceTagComponent_Properties[] = {
-    { "Tags", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "Tags", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_GUID, 16 },
 };
 static const ComponentLayoutDef g_eoc_VoiceTagComponent_Layout = {
     .componentName = "eoc::VoiceTagComponent",
@@ -4311,7 +4311,7 @@ static const ComponentLayoutDef g_eoc_StateComponent_Layout = {
 // eoc::combat::IsThreatenedComponent - 16 bytes (0x10)
 // Source: IsThreatenedComponent from Windows BG3SE
 static const ComponentPropertyDef g_eoc_IsThreatenedComponent_Properties[] = {
-    { "ThreatenedBy", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "ThreatenedBy", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_ENTITY_HANDLE, 8 },
 };
 static const ComponentLayoutDef g_eoc_IsThreatenedComponent_Layout = {
     .componentName = "eoc::combat::IsThreatenedComponent",
@@ -4367,7 +4367,7 @@ static const ComponentLayoutDef g_eoc_ZoneBlockReasonComponent_Layout = {
 // eoc::god::TagComponent - 16 bytes (0x10)
 // Source: GodTagComponent from Windows BG3SE
 static const ComponentPropertyDef g_eoc_TagComponent_Properties[] = {
-    { "Tags", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "Tags", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_GUID, 16 },
 };
 static const ComponentLayoutDef g_eoc_TagComponent_Layout = {
     .componentName = "eoc::god::TagComponent",
