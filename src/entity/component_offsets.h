@@ -5072,13 +5072,62 @@ static const ComponentLayoutDef g_esv_CustomStatsComponent_Layout = {
     .propertyCount = sizeof(g_esv_CustomStatsComponent_Properties) / sizeof(g_esv_CustomStatsComponent_Properties[0]),
 };
 
-// esv::DisplayNameListComponent - 40 bytes (0x28)
+/* esv::DisplayNameListComponent -- upstream (Components/Visual.h:827) is
+ *   Array<esv::DisplayName> Names; Array<esv::DisplayTitle> Titles; uint8 HideTitle;
+ * where esv::DisplayName is { TranslatedString NameKey; uint8 field_10;
+ * STDString Name; } -- note it carries BOTH a localisation handle and a RAW
+ * string, unlike eoc::DisplayNameComponent.
+ *
+ * The 0x28 size agrees: two 0x10 Array headers plus HideTitle, padded.
+ *
+ * The element stride is NOT taken from upstream's legacy `field_10` name, which
+ * would imply TranslatedString is 0x10 while this build's
+ * eoc::DisplayNameComponent (0x40, two TranslatedStrings) implies 0x20. Legacy
+ * names describe an older layout and have misled this port before, so the raw
+ * buffer and count are exposed read-only to measure the real stride live before
+ * the element layout is committed. */
+/* esv::DisplayName element -- stride 0x50, MEASURED live rather than derived
+ * from the header: in a dump of a character's Names buffer the raw text sits at
+ * element+0x40 in short STDString form (length byte 0x07 at +0x4f for
+ * "Lae'zel"), and the next element's header repeats at +0x50 on two different
+ * characters. The localisation handle is the FixedString at +0x00, the first
+ * word of the leading TranslatedString. The bytes between are not described
+ * until they are understood. */
+static const ComponentPropertyDef g_esvDisplayName_Properties[] = {
+    { "NameKey", 0x00, FIELD_TYPE_FIXEDSTRING, 0, false },
+    /* upstream's field_10. Measured live to be a PRIORITY, lowest wins: a
+     * resculpted origin carries a priority-4 entry holding the race handle that
+     * outranks its own priority-6 name entry, which is why it displays "Elf"
+     * while its Name field already reads correctly. A character created in
+     * character creation has no such entry and displays its typed name. */
+    { "Priority", 0x10, FIELD_TYPE_UINT8, 0, false },
+    { "Name",    0x40, FIELD_TYPE_STDSTRING,   0, false },
+};
+
+static const ComponentLayoutDef g_esvDisplayName_Layout = {
+    .componentName = "esv::DisplayName",
+    .shortName = "esvDisplayName",
+    .componentTypeIndex = 0,
+    .componentSize = 0x50,
+    .properties = g_esvDisplayName_Properties,
+    .propertyCount = sizeof(g_esvDisplayName_Properties) / sizeof(g_esvDisplayName_Properties[0]),
+};
+
 static const ComponentPropertyDef g_esv_DisplayNameListComponent_Properties[] = {
-    { "Names", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "Names", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_STRUCT, 0x50,
+      .structLayout = &g_esvDisplayName_Layout },
+    // Array<T> header: buf @0x00, capacity @0x08, size @0x0c
+    { "NamesBuf",    0x00, FIELD_TYPE_UINT64, 0, true },
+    { "NamesCount",  0x0c, FIELD_TYPE_UINT32, 0, true },
+    { "TitlesBuf",   0x10, FIELD_TYPE_UINT64, 0, true },
+    { "TitlesCount", 0x1c, FIELD_TYPE_UINT32, 0, true },
+    { "HideTitle",   0x20, FIELD_TYPE_UINT8,  0, false },
 };
 static const ComponentLayoutDef g_esv_DisplayNameListComponent_Layout = {
     .componentName = "esv::DisplayNameListComponent",
-    .shortName = "DisplayNameList",
+    /* Upstream's Lua-facing name is ServerDisplayNameList (DEFINE_COMPONENT);
+     * "DisplayNameList" would not match what mods ask for. */
+    .shortName = "ServerDisplayNameList",
     .componentTypeIndex = 0,
     .componentSize = 0x28,
     .properties = g_esv_DisplayNameListComponent_Properties,

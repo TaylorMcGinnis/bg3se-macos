@@ -143,6 +143,17 @@ that field writable.
   miss, since it raises no error. Short names now resolve through the upstream
   name table before lookup.
 
+- **`esv::DisplayNameListComponent` is readable.** It was a stub: `Names` was an
+  opaque array with no element type, and its Lua name was `DisplayNameList`
+  where upstream's `DEFINE_COMPONENT` says **`ServerDisplayNameList`** -- so no
+  mod could reach it. Upstream's `esv::DisplayName` element carries both a
+  localisation key and a raw `STDString`, and its 0x50 stride was measured live
+  (the text sits at element+0x40 in short-string form, and the next element's
+  header repeats at +0x50 on two different characters) rather than inferred from
+  the header's legacy `field_10` name, which implies a different
+  `TranslatedString` size than this build uses. Element+0x10 is exposed as
+  `Priority`; it is a selector where the lowest value wins.
+
 Known gap: `Ext.Types.Serialize` accepts only component and component-array
 userdata, so a root template (a `BG3SE.ResourceObject` proxy, which already has
 layout-driven read/write) is refused. Mods clone templates through
