@@ -4774,8 +4774,60 @@ static const ComponentLayoutDef g_esv_AIHintAreaTrigger_Layout = {
 
 // esv::ActivationGroupContainerComponent - 16 bytes (0x10)
 // Source: ServerData.h
+/* AnimationWaterfallElement (upstream Components/Visual.h:125) -- three
+ * FixedStrings, every member 4 bytes, so the 0x0c stride is unambiguous. */
+static const ComponentPropertyDef g_AnimationWaterfallElement_Properties[] = {
+    { "Slot",     0x00, FIELD_TYPE_FIXEDSTRING, 0, false },
+    { "Resource", 0x04, FIELD_TYPE_FIXEDSTRING, 0, false },
+    { "Type",     0x08, FIELD_TYPE_FIXEDSTRING, 0, false },
+};
+
+static const ComponentLayoutDef g_AnimationWaterfallElement_Layout = {
+    .componentName = "AnimationWaterfallElement",
+    .shortName = "AnimationWaterfallElement",
+    .componentTypeIndex = 0,
+    .componentSize = 0x0c,
+    .properties = g_AnimationWaterfallElement_Properties,
+    .propertyCount = sizeof(g_AnimationWaterfallElement_Properties) / sizeof(g_AnimationWaterfallElement_Properties[0]),
+};
+
+/* ActivationGroupData (upstream Components/ServerData.h:70) -- two FixedStrings.
+ * Upstream names both members field_N, so they are named the same here. */
+static const ComponentPropertyDef g_ActivationGroupData_Properties[] = {
+    { "field_0", 0x00, FIELD_TYPE_FIXEDSTRING, 0, false },
+    { "field_4", 0x04, FIELD_TYPE_FIXEDSTRING, 0, false },
+};
+
+static const ComponentLayoutDef g_ActivationGroupData_Layout = {
+    .componentName = "ActivationGroupData",
+    .shortName = "ActivationGroupData",
+    .componentTypeIndex = 0,
+    .componentSize = 0x08,
+    .properties = g_ActivationGroupData_Properties,
+    .propertyCount = sizeof(g_ActivationGroupData_Properties) / sizeof(g_ActivationGroupData_Properties[0]),
+};
+
+/* AnimationTag (upstream Components/Visual.h:139) -- Guid + uint8. Upstream's
+ * legacy name for the byte is field_10, which places it right after the 16-byte
+ * Guid, so the struct is Guid(16) + byte + padding to the Guid's 8 alignment =
+ * 0x18. Neither member has a toolchain-dependent size. */
+static const ComponentPropertyDef g_AnimationTag_Properties[] = {
+    { "Tag",      0x00, FIELD_TYPE_GUID,  0, false },
+    { "field_10", 0x10, FIELD_TYPE_UINT8, 0, false },
+};
+
+static const ComponentLayoutDef g_AnimationTag_Layout = {
+    .componentName = "AnimationTag",
+    .shortName = "AnimationTag",
+    .componentTypeIndex = 0,
+    .componentSize = 0x18,
+    .properties = g_AnimationTag_Properties,
+    .propertyCount = sizeof(g_AnimationTag_Properties) / sizeof(g_AnimationTag_Properties[0]),
+};
+
 static const ComponentPropertyDef g_esv_ActivationGroupContainerComponent_Properties[] = {
-    { "Groups", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },  // Array<ActivationGroupData>
+    { "Groups", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_STRUCT, 0x08,
+      .structLayout = &g_ActivationGroupData_Layout },  // Array<ActivationGroupData>
 };
 static const ComponentLayoutDef g_esv_ActivationGroupContainerComponent_Layout = {
     .componentName = "esv::ActivationGroupContainerComponent",
@@ -8204,7 +8256,8 @@ static const ComponentLayoutDef g_ls_AnimationSetUpdateRequest_Layout = {
 // ls::animation::DynamicAnimationTagsComponent - 16 bytes (0x10)
 // Source: Visual.h, COMPONENT_SIZES_LS_ANIMATION.md
 static const ComponentPropertyDef g_ls_DynamicAnimationTags_Properties[] = {
-    { "Tags", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "Tags", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_STRUCT, 0x18,
+      .structLayout = &g_AnimationTag_Layout },
 };
 static const ComponentLayoutDef g_ls_DynamicAnimationTags_Layout = {
     .componentName = "ls::animation::DynamicAnimationTagsComponent",
@@ -8246,7 +8299,8 @@ static const ComponentLayoutDef g_ls_RemoveAnimationSetsGameplayRequestOneFrame_
 // ls::animation::TemplateAnimationSetOverrideComponent - 16 bytes (0x10)
 // Source: Visual.h, COMPONENT_SIZES_LS_ANIMATION.md
 static const ComponentPropertyDef g_ls_TemplateAnimationSetOverride_Properties[] = {
-    { "Overrides", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "Overrides", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_STRUCT, 0x0c,
+      .structLayout = &g_AnimationWaterfallElement_Layout },
 };
 static const ComponentLayoutDef g_ls_TemplateAnimationSetOverride_Layout = {
     .componentName = "ls::animation::TemplateAnimationSetOverrideComponent",

@@ -49,6 +49,9 @@ certain, or a struct layout already verified live):
 | `eoc::spell::PlayerPrepareSpellComponent` | `Spells` | `Array<SpellMetaId>` | STRUCT/0x30 **verified live** |
 | `eoc::UseBoostsComponent` | `Boosts` | `Array<BoostDescription>` | STRUCT/0x0c **verified live** |
 | `esv::IconListComponent` | `Icons` | `Array<IconInfo>` | STRUCT/0x08 **verified live** |
+| `ls::animation::TemplateAnimationSetOverrideComponent` | `Overrides` | `Array<AnimationWaterfallElement>` | STRUCT/0x0c **verified live** |
+| `esv::ActivationGroupContainerComponent` | `Groups` | `Array<ActivationGroupData>` | STRUCT/0x08 **verified live** |
+| `ls::animation::DynamicAnimationTagsComponent` | `Tags` | `Array<AnimationTag>` | STRUCT/0x18 **verified live** |
 
 Verified live by scanning every entity carrying the component
 (`Ext.Entity.GetAllEntitiesWithComponent`, far better than checking party
@@ -57,6 +60,9 @@ members — the first two attempts found nothing because boosts live on items):
 - `SpellMetaId` arrays: 5 entries, `[1].OriginatorPrototype = "Target_Sanctuary"`
 - `UseBoosts.Boosts`: `[1].Boost = "Advantage"`, `.Params = "AttackRoll"`
 - `IconList.Icons`: `[1].Icon = "Item_CONT_HAG_ThornyBush"`, `.field_4 = 4`
+- `TemplateAnimationSetOverride.Overrides`: `[1].Type = "TemplateOverride"`
+- `ActivationGroupContainer.Groups`: `[1].field_4 = "ParentPlatform"`
+- `DynamicAnimationTags.Tags`: 4 and 3 entries on two entities, `[1].Tag` a real GUID
 
 `BoostDescription` (three FixedStrings, 0x0c) and `IconInfo` (FixedString +
 uint32, 0x08) have strides that are *derived* rather than hex-dumped, which is
@@ -85,9 +91,20 @@ correctly.
 Each needs a struct layout plus the element stride established live (expose the
 raw buffer and count, hex dump, find where the next element's header repeats,
 confirm on two entities):
-`BoostDescription` (4 uses), `IconInfo`, `AnimationTag`, `LevelUpData`,
-`SurfacePathInfluence`, `BaseWeaponDamage`, `ActivationGroupData`,
-`stats::Requirement`, `SpellMeta`, `AnimationWaterfallElement`, `State`.
+`LevelUpData` (contains a `std::array` and a nested `Array`),
+`SurfacePathInfluence` (leading enum of unknown width),
+`BaseWeaponDamage` (contains `RollDefinition`, size unknown),
+`stats::Requirement`, `SpellMeta`, `State` (shapeshift; large and
+`std::optional`-heavy).
+
+Structs whose members are ALL fixed-size PODs can have their stride derived
+rather than measured — there is no type whose size varies by toolchain, which is
+the hazard behind `TranslatedString`, `STDString` and `std::optional`. That is
+how `BoostDescription` (0x0c), `IconInfo` (0x08), `AnimationWaterfallElement`
+(0x0c), `ActivationGroupData` (0x08) and `AnimationTag` (0x18) were done, and
+all five were then confirmed live anyway. Anything containing an enum, a
+`std::optional`, a `std::array` or another struct of unknown size must be
+measured.
 
 ### Still to do, element type unknown
 
