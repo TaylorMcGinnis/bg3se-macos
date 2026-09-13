@@ -47,11 +47,38 @@ certain, or a struct layout already verified live):
 | `eoc::TurnOrderComponent` | `TurnOrderIndices`, `TurnOrderIndices2` | `Array<uint64_t>` | UINT64/8 (element type added) |
 | `eoc::spell::CCPrepareSpellComponent` | `Spells` | `Array<SpellMetaId>` | STRUCT/0x30 **verified live** |
 | `eoc::spell::PlayerPrepareSpellComponent` | `Spells` | `Array<SpellMetaId>` | STRUCT/0x30 **verified live** |
+| `eoc::UseBoostsComponent` | `Boosts` | `Array<BoostDescription>` | STRUCT/0x0c **verified live** |
+| `esv::IconListComponent` | `Icons` | `Array<IconInfo>` | STRUCT/0x08 **verified live** |
 
-Only the two `SpellMetaId` arrays had a populated instance to check: both read 5
-entries with `[1].OriginatorPrototype = "Target_Sanctuary"`. The others read
-their array headers correctly but their element decoding is inferred from
-upstream's declaration, not observed.
+Verified live by scanning every entity carrying the component
+(`Ext.Entity.GetAllEntitiesWithComponent`, far better than checking party
+members — the first two attempts found nothing because boosts live on items):
+
+- `SpellMetaId` arrays: 5 entries, `[1].OriginatorPrototype = "Target_Sanctuary"`
+- `UseBoosts.Boosts`: `[1].Boost = "Advantage"`, `.Params = "AttackRoll"`
+- `IconList.Icons`: `[1].Icon = "Item_CONT_HAG_ThornyBush"`, `.field_4 = 4`
+
+`BoostDescription` (three FixedStrings, 0x0c) and `IconInfo` (FixedString +
+uint32, 0x08) have strides that are *derived* rather than hex-dumped, which is
+acceptable only because every member is 4 bytes — there is no type here whose
+size varies by toolchain, which is the hazard that made `TranslatedString`,
+`STDString` and `std::optional` untrustworthy. Both are now confirmed live
+anyway.
+
+The remaining typed arrays read their headers correctly but had no populated
+instance, so their element decoding is inferred, not observed.
+
+### Caught by this audit: `eoc::UseComponent` array offsets are WRONG
+
+Typing `Use.Boosts` as `Array<BoostDescription>` produced element proxies whose
+buffer pointer was `0x1` — the invalid-array sentinel — meaning the `Array`
+header is not at the offset this layout claims. The typing was reverted and the
+component left opaque **on purpose**: an untyped array yields nothing, while a
+typed one over a bad offset yields plausible-looking garbage, which is worse.
+`Use.Requirements`, `Use.Boosts`, `BoostsOnEquipMainHand` and
+`BoostsOnEquipOffHand` all need their offsets established live before typing.
+Note `eoc::UseBoostsComponent.Boosts` is a *different* component and reads
+correctly.
 
 ### Still to do, needing a MEASURED stride
 

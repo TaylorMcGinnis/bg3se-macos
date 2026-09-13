@@ -4004,8 +4004,43 @@ static const ComponentLayoutDef g_eoc_UnlockInterruptBoostComponent_Layout = {
 
 // eoc::UseBoostsComponent - 16 bytes (0x10)
 // Source: UseBoostsComponent from Windows BG3SE
+/* BoostDescription (upstream Base/ExposedTypes.h:88) -- three FixedStrings.
+ * Every member is 4 bytes, so unlike TranslatedString or STDString there is no
+ * toolchain-dependent sizing here and the 0x0C stride is unambiguous. */
+static const ComponentPropertyDef g_BoostDescription_Properties[] = {
+    { "Boost",   0x00, FIELD_TYPE_FIXEDSTRING, 0, false },
+    { "Params",  0x04, FIELD_TYPE_FIXEDSTRING, 0, false },
+    { "Params2", 0x08, FIELD_TYPE_FIXEDSTRING, 0, false },
+};
+
+static const ComponentLayoutDef g_BoostDescription_Layout = {
+    .componentName = "BoostDescription",
+    .shortName = "BoostDescription",
+    .componentTypeIndex = 0,
+    .componentSize = 0x0c,
+    .properties = g_BoostDescription_Properties,
+    .propertyCount = sizeof(g_BoostDescription_Properties) / sizeof(g_BoostDescription_Properties[0]),
+};
+
+/* IconInfo (upstream Components/Visual.h:836) -- FixedString + uint32, both
+ * 4 bytes, so the 0x08 stride is likewise unambiguous. */
+static const ComponentPropertyDef g_IconInfo_Properties[] = {
+    { "Icon",    0x00, FIELD_TYPE_FIXEDSTRING, 0, false },
+    { "field_4", 0x04, FIELD_TYPE_UINT32,      0, false },
+};
+
+static const ComponentLayoutDef g_IconInfo_Layout = {
+    .componentName = "IconInfo",
+    .shortName = "IconInfo",
+    .componentTypeIndex = 0,
+    .componentSize = 0x08,
+    .properties = g_IconInfo_Properties,
+    .propertyCount = sizeof(g_IconInfo_Properties) / sizeof(g_IconInfo_Properties[0]),
+};
+
 static const ComponentPropertyDef g_eoc_UseBoostsComponent_Properties[] = {
-    { "Boosts", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "Boosts", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_STRUCT, 0x0c,
+      .structLayout = &g_BoostDescription_Layout },
 };
 static const ComponentLayoutDef g_eoc_UseBoostsComponent_Layout = {
     .componentName = "eoc::UseBoostsComponent",
@@ -4018,6 +4053,13 @@ static const ComponentLayoutDef g_eoc_UseBoostsComponent_Layout = {
 
 // eoc::UseComponent - 80 bytes (0x50)
 // Source: UseComponent from Windows BG3SE
+/* NOTE: this component's array offsets are WRONG on this build. Typing
+ * .Boosts as Array<BoostDescription> handed out element proxies whose buffer
+ * pointer was 0x1 -- the invalid-array sentinel -- i.e. the Array header is not
+ * where this layout says. Left deliberately untyped: an opaque array yields
+ * nothing, while a typed one over a bad offset yields plausible-looking
+ * garbage. The offsets need establishing live before these are typed.
+ * (eoc::UseBoostsComponent.Boosts, a different component, reads correctly.) */
 static const ComponentPropertyDef g_eoc_UseComponent_Properties[] = {
     { "Requirements", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
     { "Charges", 0x10, FIELD_TYPE_INT32, 0, false },
@@ -5280,7 +5322,8 @@ static const ComponentLayoutDef g_esv_HealthComponent_Layout = {
 
 // esv::IconListComponent - 16 bytes (0x10)
 static const ComponentPropertyDef g_esv_IconListComponent_Properties[] = {
-    { "Icons", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "Icons", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_STRUCT, 0x08,
+      .structLayout = &g_IconInfo_Layout },
 };
 static const ComponentLayoutDef g_esv_IconListComponent_Layout = {
     .componentName = "esv::IconListComponent",
@@ -8425,6 +8468,7 @@ static const ComponentLayoutDef g_CharacterCreationTemplateOverride_Layout = {
     .properties = g_CharacterCreationTemplateOverride_Properties,
     .propertyCount = sizeof(g_CharacterCreationTemplateOverride_Properties) / sizeof(g_CharacterCreationTemplateOverride_Properties[0]),
 };
+
 
 static const ComponentLayoutDef* g_AllComponentLayouts[] = {
     &g_CharacterCreationAppearance_Layout,
