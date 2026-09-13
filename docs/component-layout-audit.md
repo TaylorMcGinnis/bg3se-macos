@@ -52,6 +52,7 @@ certain, or a struct layout already verified live):
 | `ls::animation::TemplateAnimationSetOverrideComponent` | `Overrides` | `Array<AnimationWaterfallElement>` | STRUCT/0x0c **verified live** |
 | `esv::ActivationGroupContainerComponent` | `Groups` | `Array<ActivationGroupData>` | STRUCT/0x08 **verified live** |
 | `ls::animation::DynamicAnimationTagsComponent` | `Tags` | `Array<AnimationTag>` | STRUCT/0x18 **verified live** |
+| `ls::trigger::IsInsideOfComponent` | `Triggers` (+ `InsideOf`) | `Array<Guid>` | GUID/16 **verified live** |
 
 Verified live by scanning every entity carrying the component
 (`Ext.Entity.GetAllEntitiesWithComponent`, far better than checking party
@@ -105,6 +106,37 @@ how `BoostDescription` (0x0c), `IconInfo` (0x08), `AnimationWaterfallElement`
 all five were then confirmed live anyway. Anything containing an enum, a
 `std::optional`, a `std::array` or another struct of unknown size must be
 measured.
+
+## Layouts that do NOT match upstream
+
+Widening the search past `DEFINE_COMPONENT` revealed a worse class of problem
+than untyped arrays: some hand-written layouts describe components upstream does
+not have, or describe the wrong members.
+
+**Corrected: `eoc::DifficultyCheckComponent` was reading the wrong memory.**
+Upstream is `HashMap<AbilityId,uint32> AbilityDC` (legacy `field_0`), `int32
+SpellSaveDCBoost` (legacy `field_40`), `int32 WeaponActionDC` (legacy
+`field_44`). A HashMap is 0x40 here, so the ints belong at 0x40/0x44 — which the
+recorded 0x48 component size confirms. The old layout had them at 0x20/0x24,
+reading the middle of the map as integers, and described the map's first two
+words as dynamic arrays. Verified after the fix: `WeaponActionDC` reads 3 and 8
+on real entities. `AbilityDC` is deliberately left undescribed — the key is an
+`AbilityId` enum of unestablished width, and a wrongly-typed map is worse than
+an absent one.
+
+**Left alone, flagged as suspect** (guessing would make them worse):
+
+| Ours | Upstream | Problem |
+|---|---|---|
+| `esv::SummonContainerComponent.Summons` | `eoc::summon::ContainerComponent` — `HashMap` + two `HashSet`s | different class, no such array |
+| `esv::InterruptDataComponent.Data` | `esv::spell_cast::InterruptDataComponent` — no `Data` member | different component |
+| `ls::animation::RemoveAnimationSets…AnimationSets` | `HashSet<FixedString>` | **not an array** — must not be typed as one |
+
+**No upstream counterpart at all** (so nothing to check them against; presumably
+derived from Ghidra, and the field names are this port's own):
+`esv::ChasmDataComponent`, `esv::ConstellationHelperComponent`,
+`esv::InventoryOwnerComponent`, `ls::uuid::ToHandleMappingComponent`,
+`eoc::spell::BookCooldownsComponent`.
 
 ### Still to do, element type unknown
 

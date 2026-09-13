@@ -3227,11 +3227,26 @@ static const ComponentLayoutDef g_eoc_DetachedComponent_Layout = {
 
 // eoc::DifficultyCheckComponent - 72 bytes (0x48)
 // Source: DifficultyCheckComponent from Windows BG3SE
+/* CORRECTED against upstream (Components/Data.h:68), which is:
+ *   HashMap<AbilityId, uint32_t> AbilityDC;   // legacy field_0
+ *   int32_t SpellSaveDCBoost;                 // legacy field_40
+ *   int32_t WeaponActionDC;                   // legacy field_44
+ *
+ * A HashMap is 0x40 in this port, so those two ints sit at 0x40 and 0x44 --
+ * which is exactly what the recorded 0x48 component size implies. The previous
+ * layout had them at 0x20/0x24, reading the middle of the HashMap as integers,
+ * and described the map's first two words as a pair of dynamic arrays. The
+ * upstream legacy names field_40/field_44 are kept as aliases at the corrected
+ * offsets, since that is what they were meant to be all along.
+ *
+ * AbilityDC itself is left undescribed rather than typed as a HashMap: the key
+ * is an AbilityId enum whose width is not established on this build, and a
+ * wrongly-typed map is worse than an absent one. */
 static const ComponentPropertyDef g_eoc_DifficultyCheckComponent_Properties[] = {
-    { "Abilities", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
-    { "field_30", 0x10, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
-    { "field_40", 0x20, FIELD_TYPE_INT32, 0, false },
-    { "field_44", 0x24, FIELD_TYPE_INT32, 0, false },
+    { "SpellSaveDCBoost", 0x40, FIELD_TYPE_INT32, 0, false },
+    { "WeaponActionDC",   0x44, FIELD_TYPE_INT32, 0, false },
+    { "field_40",         0x40, FIELD_TYPE_INT32, 0, false },
+    { "field_44",         0x44, FIELD_TYPE_INT32, 0, false },
 };
 static const ComponentLayoutDef g_eoc_DifficultyCheckComponent_Layout = {
     .componentName = "eoc::DifficultyCheckComponent",
@@ -8356,7 +8371,11 @@ static const ComponentLayoutDef g_ls_SceneStage_Layout = {
 // ls::trigger::IsInsideOfComponent - 16 bytes (0x10)
 // Source: COMPONENT_SIZES_LS_MISC.md
 static const ComponentPropertyDef g_ls_IsInsideOf_Properties[] = {
-    { "Triggers", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    /* Upstream (Components/Trigger.h:409) is a single `Array<Guid> InsideOf`,
+     * which matches this component's 0x10 size (one Array header). Both names
+     * are offered: mods following upstream ask for InsideOf. */
+    { "Triggers", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_GUID, 16 },
+    { "InsideOf", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_GUID, 16 },
 };
 static const ComponentLayoutDef g_ls_IsInsideOf_Layout = {
     .componentName = "ls::trigger::IsInsideOfComponent",
