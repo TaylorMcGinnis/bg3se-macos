@@ -238,3 +238,140 @@ hex dump it, and find where the next element's header repeats. Confirm on two
 different entities. This is how `esv::DisplayName`'s 0x50 stride was established
 after the header's legacy names implied a different `TranslatedString` size than
 this build uses.
+
+## Generated layouts: offsets were computed wrong (2026-09-13)
+
+`generated_property_defs.h` is produced by `tools/generate_layouts.py` from the
+Windows headers' field lists. The field *names and order* come from upstream, but
+the *offsets* were computed here -- and `calculate_offsets` computed them wrong.
+
+`parse_type` returns `(None, size)` for a field Lua cannot surface: a pointer,
+a container, a string. The `None` means "do not expose", the size means "but it
+still occupies this much space". `calculate_offsets` read the `None` and
+`continue`d **without advancing the cursor**, so every field after a skipped one
+sat too low by exactly that field's width.
+
+That is not a corner case. `esv::Projectile` begins with a vtable pointer, so all
+48 of its fields were off by 8. It is also the already-known
+`eoc::DifficultyCheckComponent` bug -- 0x20/0x24 where the truth was 0x40/0x44,
+one skipped 32-byte field -- found by hand earlier in this audit without
+recognising it as a generator defect rather than a one-off.
+
+Measured across the 293 layouts the generator emitted: **79 had wrong offsets,
+affecting 357 individual fields.** Every one of them returned a plausible number
+read from the wrong address, and none of them ever threw.
+
+Three further defects in the same function:
+
+- `STDString` was sized 32 and `TranslatedString` 40, copied from Windows. This
+  build's are **16** (`src/core/stdstring.h`, verified live) and **0x20**
+  (measured in `eoc::DisplayNameComponent`).
+- Alignment was `min(size, 8)`, which over-aligns `glm::vec3`: 12 bytes with
+  4-byte alignment, not 8. 30 fields moved as a result of fixing this.
+- Any qualified type whose name contained `Type`, `Id` or `Flags` was guessed at
+  4 bytes. Enums here are frequently 1 byte -- `DamageType` is -- so the guess
+  shifted everything after it.
+
+### Two oracles now gate every emitted layout
+
+Rather than replace one set of unverified offsets with another, the generator now
+has to *corroborate* a layout or drop it. A missing layout reads as nil, which is
+loud; a wrong one reads as a number, which is silent.
+
+1. **Self-naming, per field.** The Windows headers name unidentified fields after
+   their own offset -- `field_1B0` sits at 0x1B0. Each is therefore its own
+   assertion about the packing. The old generator scored **173/380**; it now
+   scores **219/219**.
+2. **The struct total**, for layouts with nothing self-named: the computed size
+   must equal the size this binary reports.
+
+Self-naming outranks the total, because a total can legitimately differ when the
+Windows header omits trailing members -- `eoc::relation::FactionComponent`'s three
+self-named fields all land exactly while the listed fields sum to 0x28 against a
+real 0x30. Requiring both would have discarded a layout that was already correct.
+
+A uniform non-zero delta across every self-named field means an unmodelled
+base-class prefix (`ecl::character_creation::DefinitionStateComponent` is +8,
+`DummyDefinitionComponent` +0x10). That is distinguishable from a genuine
+Windows/ARM64 divergence, which would shift each field by a *different* amount as
+the differences accumulate -- so a uniform delta is applied as a prefix, but only
+where the total then also lands on the reported size.
+
+Container widths were not guessed either: fitting every computable struct against
+the size oracle scored 287/333 exact at `Array=16 / HashSet=48 / HashMap=64`, and
+lower at every other combination.
+
+Unknown-width types now **truncate** the layout instead of being skipped. Fields
+before the unknown are still correct, because a field's offset depends only on
+what precedes it; nothing after it is knowable.
+
+### Result: 293 layouts -> 213
+
+357 wrong fields are gone. 310 correct fields kept their offsets, 30 moved for the
+`vec3` alignment fix. The hand-verified layouts in `component_offsets.h` are
+untouched and still win on lookup, so none of the earlier hand-verification was
+disturbed. 56 components lost coverage they should not be assumed to have had:
+
+| Component | Why it was dropped |
+| --- | --- |
+| `ecl::GameCameraBehavior` | self-named offsets disagree |
+| `ecl::TLPreviewDummy` | no Lua-visible field before the first unknown type |
+| `ecl::camera::SelectorModeComponent` | no ARM64 size, nothing self-named |
+| `ecl::character_creation::DefinitionStateComponent` | uniform base-class prefix, unconfirmed |
+| `ecl::character_creation::DummyDefinitionComponent` | uniform base-class prefix, unconfirmed |
+| `ecl::photo_mode::CameraSavedTransformComponent` | no Lua-visible field before the first unknown type |
+| `ecl::photo_mode::RequestedSingletonComponent` | no ARM64 size, nothing self-named |
+| `eoc::BlockAbilityModifierFromACComponent` | no ARM64 size, nothing self-named |
+| `eoc::CanInteractComponent` | no Lua-visible field before the first unknown type |
+| `eoc::CustomIconComponent` | no Lua-visible field before the first unknown type |
+| `eoc::FloatingComponent` | uniform base-class prefix, unconfirmed |
+| `eoc::GameplayLightComponent` | uniform base-class prefix, unconfirmed |
+| `eoc::ObjectSizeComponent` | computed size != ARM64 size |
+| `eoc::SteeringComponent` | self-named offsets disagree |
+| `eoc::camp::ChestComponent` | uniform base-class prefix, unconfirmed |
+| `eoc::character_creation::ChangeAppearanceDefinitionComponent` | no Lua-visible field before the first unknown type |
+| `eoc::character_creation::CharacterDefinitionComponent` | no Lua-visible field before the first unknown type |
+| `eoc::character_creation::DefinitionCommonComponent` | uniform base-class prefix, unconfirmed |
+| `eoc::character_creation::FullRespecDefinitionComponent` | no Lua-visible field before the first unknown type |
+| `eoc::character_creation::LevelUpDefinitionComponent` | no Lua-visible field before the first unknown type |
+| `eoc::dialog::StateComponent` | self-named offsets disagree |
+| `eoc::hit::AttackerComponent` | no ARM64 size, nothing self-named |
+| `eoc::hit::ThrownObjectComponent` | no ARM64 size, nothing self-named |
+| `eoc::hit::WeaponComponent` | no ARM64 size, nothing self-named |
+| `eoc::interrupt::ActionStateComponent` | no Lua-visible field before the first unknown type |
+| `eoc::party::CompositionComponent` | computed size != ARM64 size |
+| `eoc::party::MemberComponent` | computed size != ARM64 size |
+| `eoc::progression::MetaComponent` | uniform base-class prefix, unconfirmed |
+| `eoc::projectile::SourceInfoComponent` | no Lua-visible field before the first unknown type |
+| `eoc::rest::LongRestState` | no Lua-visible field before the first unknown type |
+| `eoc::ruleset::RulesetComponent` | self-named offset precedes computed offset |
+| `eoc::shapeshift::ReplicatedChangesComponent` | no Lua-visible field before the first unknown type |
+| `eoc::spatial_grid::DataComponent` | no Lua-visible field before the first unknown type |
+| `eoc::spell_cast::AnimationInfoComponent` | self-named offsets disagree |
+| `eoc::spell_cast::MovementComponent` | computed size != ARM64 size |
+| `eoc::spell_cast::SyncTargetingComponent` | no Lua-visible field before the first unknown type |
+| `eoc::unsheath::StateComponent` | self-named offsets disagree |
+| `esv::AnubisExecutorComponent` | all_fields_out_of_bounds |
+| `esv::BreadcrumbComponent` | no Lua-visible field before the first unknown type |
+| `esv::combat::CombatGroupMappingComponent` | no ARM64 size, nothing self-named |
+| `esv::combat::FleeRequestComponent` | no ARM64 size, nothing self-named |
+| `esv::death::DelayedDeathComponent` | no Lua-visible field before the first unknown type |
+| `esv::death::StateComponent` | no ARM64 size, nothing self-named |
+| `esv::sight::AggregatedGameplayLightDataComponent` | no ARM64 size, nothing self-named |
+| `esv::sight::AiGridViewshedComponent` | no ARM64 size, nothing self-named |
+| `esv::spell_cast::CastResponsibleComponent` | no ARM64 size, nothing self-named |
+| `esv::spell_cast::InterruptDataComponent` | no ARM64 size, nothing self-named |
+| `esv::spell_cast::MovementComponent` | no ARM64 size, nothing self-named |
+| `esv::spell_cast::StateComponent` | no Lua-visible field before the first unknown type |
+| `esv::stats::proficiency::BaseProficiencyComponent` | no Lua-visible field before the first unknown type |
+| `esv::status::CauseComponent` | computed size != ARM64 size |
+| `esv::status::aura::RemovedStatusAuraEffectEventOneFrameComponent` | no ARM64 size, nothing self-named |
+| `ls::DecalComponent` | all_fields_out_of_bounds |
+| `ls::EffectComponent` | prefix runs past end of component |
+| `ls::VisualChangeRequestOneFrameComponent` | no ARM64 size, nothing self-named |
+| `ls::trigger::AreaComponent` | no Lua-visible field before the first unknown type |
+
+Of these, the 11 dropped for a *proven* mismatch were actively returning wrong
+values, `eoc::party::MemberComponent` and `eoc::relation::FactionComponent` among
+them. The rest are merely uncorroborated, and are the worklist for hand
+verification -- the same treatment `component_offsets.h` entries already get.
