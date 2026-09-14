@@ -1262,7 +1262,7 @@ static const ComponentLayoutDef g_Cc_eoc__identity__StateComponent_Layout = {
 // ======================================================================
 // eoc::InteractionFilterComponent
 // Size 0x38 (56 bytes)
-// Checked: no ARM64 size; every Windows self-named offset lands exactly
+// Checked: compiled sizeof reproduces ARM64 size 0x38
 // ======================================================================
 
 static const ComponentPropertyDef g_Cc_eoc__InteractionFilterComponent_Properties[] = {
@@ -5428,26 +5428,6 @@ static const ComponentLayoutDef g_Cc_eoc__hit__ProxyComponent_Layout = {
 };
 
 // ======================================================================
-// eoc::hit::TargetComponent
-// Size 0x78 (120 bytes)
-// Checked: no ARM64 size; every Windows self-named offset lands exactly
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_eoc__hit__TargetComponent_Properties[] = {
-    { "field_0", 0x00, FIELD_TYPE_ENTITY_HANDLE, 0, true },
-    { "field_8", 0x08, FIELD_TYPE_ENTITY_HANDLE, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_eoc__hit__TargetComponent_Layout = {
-    .componentName = "eoc::hit::TargetComponent",
-    .shortName = "Target",
-    .componentTypeIndex = 0,
-    .componentSize = 0x78,
-    .properties = g_Cc_eoc__hit__TargetComponent_Properties,
-    .propertyCount = sizeof(g_Cc_eoc__hit__TargetComponent_Properties) / sizeof(g_Cc_eoc__hit__TargetComponent_Properties[0]),
-};
-
-// ======================================================================
 // ls::InstancingGroupVisualComponent
 // Size 0x18 (24 bytes)
 // Checked: no ARM64 size; every Windows self-named offset lands exactly
@@ -5744,7 +5724,7 @@ static const ComponentLayoutDef g_Cc_eoc__inventory__WieldedComponent_Layout = {
 // ======================================================================
 // eoc::inventory::WieldingHistoryComponent
 // Size 0x10 (16 bytes)
-// Checked: no ARM64 size; every Windows self-named offset lands exactly
+// Checked: compiled sizeof reproduces ARM64 size 0x10
 // ======================================================================
 
 static const ComponentPropertyDef g_Cc_eoc__inventory__WieldingHistoryComponent_Properties[] = {
@@ -6629,7 +6609,7 @@ static const ComponentLayoutDef g_Cc_eoc__trigger__TypeComponent_Layout = {
     .propertyCount = sizeof(g_Cc_eoc__trigger__TypeComponent_Properties) / sizeof(g_Cc_eoc__trigger__TypeComponent_Properties[0]),
 };
 
-#define COMPILED_COMPONENT_COUNT 319
+#define COMPILED_COMPONENT_COUNT 318
 
 static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_eoc__light__ActiveCharacterLightComponent_Layout,
@@ -6891,7 +6871,6 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_eoc__hit__LifetimeComponent_Layout,
     &g_Cc_eoc__hit__MetaComponent_Layout,
     &g_Cc_eoc__hit__ProxyComponent_Layout,
-    &g_Cc_eoc__hit__TargetComponent_Layout,
     &g_Cc_ls__InstancingGroupVisualComponent_Layout,
     &g_Cc_eoc__interrupt__ConditionallyDisabledComponent_Layout,
     &g_Cc_eoc__interrupt__DataComponent_Layout,

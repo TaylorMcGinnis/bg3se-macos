@@ -206,8 +206,23 @@ def calculate_offsets(fields: List[dict]) -> Tuple[List[FieldInfo], int, Optiona
     return result, offset, None
 
 
+LIVE_SIZES = Path("ghidra/offsets/components/live_component_sizes.json")
+
+
 def load_ghidra_sizes() -> Dict[str, int]:
-    """Load Ghidra-extracted sizes for ARM64 verification."""
+    """Component sizes to validate against, engine-reported where available.
+
+    The Ghidra extraction is the fallback; live_component_sizes.json, harvested
+    from a running game via Ext.Entity.GetComponentSizes(), wins where it has an
+    entry. It is EntityStorageData::ComponentSizes -- the stride the ECS actually
+    addresses by -- so it outranks any static extraction of it, and the static
+    one is demonstrably wrong in places (it recorded eoc::hit::TargetComponent
+    as 0x18 against a real 0xb8, and ls::EffectComponent as 0x8, smaller than
+    that struct's own first two fields).
+
+    Both generators must read the same oracle, or a layout this one emits can
+    contradict the size the other validated against.
+    """
     sizes = {}
 
     for md_file in GHIDRA_SIZES_DIR.glob("COMPONENT_SIZES*.md"):
@@ -241,6 +256,13 @@ def load_ghidra_sizes() -> Dict[str, int]:
 
                         if size and 0 < size <= 10000:
                             sizes[name.lower()] = size
+
+    if LIVE_SIZES.exists():
+        live = json.loads(LIVE_SIZES.read_text(encoding='utf-8'))
+        for k, v in live.items():
+            sizes[k.lower()] = v
+        import sys as _sys
+        print(f"// live component sizes: {len(live)} entries", file=_sys.stderr)
 
     return sizes
 

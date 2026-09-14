@@ -597,3 +597,36 @@ with a live size declares that size.
 Generator effect was modest -- 15 sizes new, 2 overriding, 9 more layouts
 confirmed (unconfirmable 143 -> 134) -- because 212 of the 227 were already
 known. The value was in the four corrections above, not the coverage.
+
+### Second harvest, and both fixes verified live (2026-09-14)
+
+A relaunch confirmed both corrections against real entities:
+
+- `eoc::IgnoreResistanceBoostComponent` now reads `DamageType` 1/3/7/7/2 and
+  `Flags` 18/36 -- small enum values, and exactly what decoding the old
+  over-reads predicted. It previously returned 604443143.
+- `eoc::DisplayNameComponent` exposes only `Name`/`NameKey`/`NameHandle`;
+  `TitleHandle` is gone and `NameHandle` resolves to a real handle.
+
+A second harvest from the new session added 30 sizes (257 total) and reported
+**no conflicts** -- the engine gives the same size for a component across
+sessions, which is what should happen and is worth having checked.
+
+It also caught one more: `eoc::hit::TargetComponent` declared **0x18 against a
+real 0xb8**. That layout had passed its gate because the *static* table also said
+0x18, which is the failure mode of validating against an extraction rather than
+the engine.
+
+The fix was structural rather than per-layout: `generate_layouts.py` was still
+reading the static table alone, so the two generators could disagree about the
+same component. Both now share the live oracle. `hit::TargetComponent` keeps its
+fields -- self-naming confirms them -- but now declares the engine's 0xb8, so
+nothing reads past the end.
+
+**Sweep is clean: 155 layouts checkable against a live size, 0 overruns, 0 size
+mismatches, across 654 components with a layout.**
+
+Coverage remains save-dependent (155 of 654 have a live size). Running
+`tools/harvest_component_sizes.py` on saves with different content is the way to
+extend it; harvests merge, and a component reporting two different sizes for one
+build would be flagged rather than silently overwritten.

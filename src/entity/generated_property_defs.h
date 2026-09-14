@@ -855,6 +855,28 @@ static const ComponentLayoutDef g_Gen_eoc_GameObjectVisualComponent_Layout = {
 };
 
 // ======================================================================
+// eoc::GameplayLightComponent
+// Field names/order from Windows BG3SE headers; offsets computed here.
+// ARM64 Size: 0x48 (72 bytes) - Ghidra verified
+// Checked: packing reproduces ARM64 size 0x48 exactly; 3 fields shifted by 0x3c for an unmodelled base-class prefix
+// ======================================================================
+
+static const ComponentPropertyDef g_Gen_eoc_GameplayLightComponent_Properties[] = {
+    { "field_3C", 0x3c, FIELD_TYPE_FLOAT, 0, true },
+    { "field_40", 0x40, FIELD_TYPE_FLOAT, 0, true },
+    { "field_44", 0x44, FIELD_TYPE_UINT8, 0, true },
+};
+
+static const ComponentLayoutDef g_Gen_eoc_GameplayLightComponent_Layout = {
+    .componentName = "eoc::GameplayLightComponent",
+    .shortName = "GameplayLight",
+    .componentTypeIndex = 0,
+    .componentSize = 0x48,
+    .properties = g_Gen_eoc_GameplayLightComponent_Properties,
+    .propertyCount = sizeof(g_Gen_eoc_GameplayLightComponent_Properties) / sizeof(g_Gen_eoc_GameplayLightComponent_Properties[0]),
+};
+
+// ======================================================================
 // eoc::HealthComponent
 // Field names/order from Windows BG3SE headers; offsets computed here.
 // ARM64 Size: 0x28 (40 bytes) - Ghidra verified
@@ -921,8 +943,8 @@ static const ComponentLayoutDef g_Gen_eoc_IconComponent_Layout = {
 // ======================================================================
 // eoc::InteractionFilterComponent
 // Field names/order from Windows BG3SE headers; offsets computed here.
-// Size: 0x38 (56 bytes) - Windows estimate
-// Checked: no ARM64 size available; every self-named offset lands exactly, size is the Windows estimate
+// ARM64 Size: 0x38 (56 bytes) - Ghidra verified
+// Checked: every self-named offset lands exactly
 // ======================================================================
 
 static const ComponentPropertyDef g_Gen_eoc_InteractionFilterComponent_Properties[] = {
@@ -1925,8 +1947,8 @@ static const ComponentLayoutDef g_Gen_eoc_hit_ProxyComponent_Layout = {
 // ======================================================================
 // eoc::hit::TargetComponent
 // Field names/order from Windows BG3SE headers; offsets computed here.
-// Size: 0x18 (24 bytes) - Windows estimate
-// Checked: no ARM64 size available; every self-named offset lands exactly, size is the Windows estimate
+// ARM64 Size: 0xb8 (184 bytes) - Ghidra verified
+// Checked: every self-named offset lands exactly; listed fields end at 0x10 of 0xb8
 // ======================================================================
 
 static const ComponentPropertyDef g_Gen_eoc_hit_TargetComponent_Properties[] = {
@@ -1938,7 +1960,7 @@ static const ComponentLayoutDef g_Gen_eoc_hit_TargetComponent_Layout = {
     .componentName = "eoc::hit::TargetComponent",
     .shortName = "Target",
     .componentTypeIndex = 0,
-    .componentSize = 0x18,
+    .componentSize = 0xb8,
     .properties = g_Gen_eoc_hit_TargetComponent_Properties,
     .propertyCount = sizeof(g_Gen_eoc_hit_TargetComponent_Properties) / sizeof(g_Gen_eoc_hit_TargetComponent_Properties[0]),
 };
@@ -2292,8 +2314,8 @@ static const ComponentLayoutDef g_Gen_eoc_inventory_WeightComponent_Layout = {
 // ======================================================================
 // eoc::inventory::WieldedComponent
 // Field names/order from Windows BG3SE headers; offsets computed here.
-// Size: 0x10 (16 bytes) - Windows estimate
-// Checked: no ARM64 size available; every self-named offset lands exactly, size is the Windows estimate
+// ARM64 Size: 0x10 (16 bytes) - Ghidra verified
+// Checked: every self-named offset lands exactly
 // ======================================================================
 
 static const ComponentPropertyDef g_Gen_eoc_inventory_WieldedComponent_Properties[] = {
@@ -2312,8 +2334,8 @@ static const ComponentLayoutDef g_Gen_eoc_inventory_WieldedComponent_Layout = {
 // ======================================================================
 // eoc::inventory::WieldingHistoryComponent
 // Field names/order from Windows BG3SE headers; offsets computed here.
-// Size: 0x10 (16 bytes) - Windows estimate
-// Checked: no ARM64 size available; every self-named offset lands exactly, size is the Windows estimate
+// ARM64 Size: 0x10 (16 bytes) - Ghidra verified
+// Checked: every self-named offset lands exactly
 // ======================================================================
 
 static const ComponentPropertyDef g_Gen_eoc_inventory_WieldingHistoryComponent_Properties[] = {
@@ -4535,7 +4557,7 @@ static const ComponentLayoutDef g_Gen_ls_uuid_Component_Layout = {
     .propertyCount = sizeof(g_Gen_ls_uuid_Component_Properties) / sizeof(g_Gen_ls_uuid_Component_Properties[0]),
 };
 
-#define GENERATED_COMPONENT_COUNT 213
+#define GENERATED_COMPONENT_COUNT 214
 
 static const ComponentLayoutDef* g_GeneratedComponentLayouts[] = {
     &g_Gen_ecl_CharacterIconRequestComponent_Layout,
@@ -4577,6 +4599,7 @@ static const ComponentLayoutDef* g_GeneratedComponentLayouts[] = {
     &g_Gen_eoc_DisarmableComponent_Layout,
     &g_Gen_eoc_FogVolumeRequestComponent_Layout,
     &g_Gen_eoc_GameObjectVisualComponent_Layout,
+    &g_Gen_eoc_GameplayLightComponent_Layout,
     &g_Gen_eoc_HealthComponent_Layout,
     &g_Gen_eoc_HearingComponent_Layout,
     &g_Gen_eoc_IconComponent_Layout,
