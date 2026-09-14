@@ -53,6 +53,8 @@ certain, or a struct layout already verified live):
 | `esv::ActivationGroupContainerComponent` | `Groups` | `Array<ActivationGroupData>` | STRUCT/0x08 **verified live** |
 | `ls::animation::DynamicAnimationTagsComponent` | `Tags` | `Array<AnimationTag>` | STRUCT/0x18 **verified live** |
 | `ls::trigger::IsInsideOfComponent` | `Triggers` (+ `InsideOf`) | `Array<Guid>` | GUID/16 **verified live** |
+| `eoc::spell::ContainerComponent` | `Spells` | `Array<SpellMeta>` | STRUCT/**0x60** **verified live** (was 80 — a bug) |
+| `eoc::spell::AddedSpellsComponent` | `Spells` | `Array<SpellMeta>` | STRUCT/0x60 **verified live** |
 
 Verified live by scanning every entity carrying the component
 (`Ext.Entity.GetAllEntitiesWithComponent`, far better than checking party
@@ -93,7 +95,8 @@ Each needs a struct layout plus the element stride established live (expose the
 raw buffer and count, hex dump, find where the next element's header repeats,
 confirm on two entities):
 `LevelUpData` (contains a `std::array` and a nested `Array`),
-`SurfacePathInfluence` (leading enum of unknown width),
+`SurfacePathInfluence` (leading enum of unknown width; no entity in the test
+save carries `SurfacePathInfluences` at all, so it cannot be measured there),
 `BaseWeaponDamage` (contains `RollDefinition`, size unknown),
 `stats::Requirement`, `SpellMeta`, `State` (shapeshift; large and
 `std::optional`-heavy).
@@ -123,6 +126,22 @@ words as dynamic arrays. Verified after the fix: `WeaponActionDC` reads 3 and 8
 on real entities. `AbilityDC` is deliberately left undescribed — the key is an
 `AbilityId` enum of unestablished width, and a wrongly-typed map is worse than
 an absent one.
+
+**Corrected: `SpellMeta` is 0x60, not 80.** `eoc::spell::ContainerComponent.Spells`
+carried `ELEM_TYPE_SPELL_META, 80`, and `ELEM_TYPE_SPELL_META`'s own comment
+asserted "80 bytes" — neither had been checked on this build. Measured from a
+16-element `AddedSpells` buffer: the element header repeats at **+0x60**. At 80
+bytes every element after the first was read misaligned, silently returning
+plausible-looking wrong data from a component mods use constantly.
+
+`SpellMeta` now has a real layout (`SpellId` at 0x00 using the verified
+`SpellMetaId`, `BoostHandle` at 0x30) instead of decoding to an opaque `__ptr`
+table. Its remaining enum/Guid members are left undescribed — upstream's legacy
+`field_29` name contradicts the current order, so their offsets are not
+established. Verified live: five consecutive elements read
+`Projectile_Jump, Target_Dip, Shout_Hide, Target_Shove, Throw_Throw`, matching
+the order `SpellBookPrepares.PreparedSpells` reports for the same character from
+a different component.
 
 **Left alone, flagged as suspect** (guessing would make them worse):
 

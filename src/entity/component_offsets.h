@@ -946,11 +946,39 @@ static const ComponentLayoutDef g_EquipableComponent_Layout = {
 // SpellContainerComponent (eoc::spell::ContainerComponent)
 // From: BG3Extender/GameDefinitions/Components/Spell.h:117-122
 // Note: Contains Array<SpellMeta>, exposed as count for now
+/* spell::SpellMeta -- stride 0x60, MEASURED. A dump of an AddedSpells buffer
+ * with 16 elements shows the header pattern repeating at +0x60, NOT the 80
+ * bytes this port previously assumed, so every element past the first in a
+ * SpellContainer was being read misaligned.
+ *
+ * Upstream (Components/Spell.h:104) leads with SpellMetaId, which this port has
+ * verified at 0x30, and the dump shows a plausible EntityHandle right after it
+ * (0xffc0000000000000). The remaining members are enums and a Guid whose
+ * offsets are not established on this build -- upstream's legacy field_29 name
+ * contradicts the current order -- so they are left undescribed rather than
+ * guessed. */
+static const ComponentPropertyDef g_SpellMeta_Properties[] = {
+    { "SpellId",     0x00, FIELD_TYPE_STRUCT, 0, false, ELEM_TYPE_UNKNOWN, 0,
+      .structLayout = &g_SpellMetaId_Layout },
+    { "BoostHandle", 0x30, FIELD_TYPE_ENTITY_HANDLE, 0, false },
+};
+
+static const ComponentLayoutDef g_SpellMeta_Layout = {
+    .componentName = "SpellMeta",
+    .shortName = "SpellMeta",
+    .componentTypeIndex = 0,
+    .componentSize = 0x60,
+    .properties = g_SpellMeta_Properties,
+    .propertyCount = sizeof(g_SpellMeta_Properties) / sizeof(g_SpellMeta_Properties[0]),
+};
+
 // ============================================================================
 
 static const ComponentPropertyDef g_SpellContainerComponent_Properties[] = {
-    // Array<SpellMeta> Spells at 0x00 - SpellMeta is 80 bytes
-    { "Spells",     0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_SPELL_META, 80 },
+    /* SpellMeta is 0x60, measured -- see g_SpellMeta_Layout. It was 80 here,
+     * which misaligned every element after the first. */
+    { "Spells",     0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_STRUCT, 0x60,
+      .structLayout = &g_SpellMeta_Layout },
     { "SpellCount", 0x0C, FIELD_TYPE_UINT32, 0, true, ELEM_TYPE_UNKNOWN, 0 },  // Array.size field
 };
 
@@ -4615,7 +4643,8 @@ static const ComponentLayoutDef g_eoc_PickUpRequestComponent_Layout = {
 // eoc::spell::AddedSpellsComponent - 16 bytes (0x10)
 // Source: AddedSpellsComponent from Windows BG3SE
 static const ComponentPropertyDef g_eoc_AddedSpellsComponent_Properties[] = {
-    { "Spells", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false },
+    { "Spells", 0x00, FIELD_TYPE_DYNAMIC_ARRAY, 0, false, ELEM_TYPE_STRUCT, 0x60,
+      .structLayout = &g_SpellMeta_Layout },
 };
 static const ComponentLayoutDef g_eoc_AddedSpellsComponent_Layout = {
     .componentName = "eoc::spell::AddedSpellsComponent",

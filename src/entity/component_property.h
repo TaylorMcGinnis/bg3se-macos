@@ -89,7 +89,10 @@ typedef enum {
 
 typedef enum {
     ELEM_TYPE_UNKNOWN = 0,      // Raw bytes (element size required)
-    ELEM_TYPE_SPELL_META,       // spell::SpellMeta (80 bytes)
+    ELEM_TYPE_SPELL_META,       // superseded: SpellMeta is 0x60 and has a real
+                                // layout now (g_SpellMeta_Layout). Kept so the
+                                // enum values do not shift; do not use for new
+                                // layouts -- it decodes to an opaque __ptr table.
     ELEM_TYPE_STATUS_INFO,      // Generic status info
     ELEM_TYPE_GUID,             // Array of GUIDs
     ELEM_TYPE_FIXED_STRING,     // Array of FixedStrings (indices)
