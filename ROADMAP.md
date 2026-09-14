@@ -2,13 +2,29 @@
 
 This document tracks the development roadmap for scope-corrected 100% parity with Windows BG3SE (Norbyte's Script Extender): 100% of the supported macOS surface.
 
-## Current Status: v0.43.0
+## Current Status: v0.47.4
 
-**Overall Feature Parity: approximately 94.8%** (unweighted mean of the supported-surface percentages in the [Feature Parity Matrix](#feature-parity-matrix), scored with behavioral accounting — see methodology below)
+**Function-level behavioral parity: 96.4%** — 270 of 280 scored contracts, 10 behavioral gaps remaining. Measured, not estimated: run `bg3se-harness parity scan --contract` to reproduce. 22 of 29 scored namespaces are at 100%.
+
+The ten remaining gaps, in full:
+
+| Namespace | Gaps |
+| --- | --- |
+| `entity_proxy` | `GetReplicationFlags`, `SetReplicationFlags`, `OnChanged` |
+| `Ext.Stats` | `AddAttribute`, `ExecuteFunctors` |
+| `Ext.Level` | `BeginPathfinding`, `BeginPathfindingImmediate` |
+| `Ext.Utils` | `GetDialogManager`, `GetGlobalSwitches` |
+| `Ext.StaticData` | `Create` |
+
+Only the two `Ext.Utils` entries are absent outright; the rest are registered but fail closed, which the contract correctly scores as zero.
+
+> **On the older numbers below.** This header previously read "v0.43.0" and "75.0% function-level behavioral parity", which was four releases and 21 points stale — the scan reported 96.4% against the same manifest. The **Feature Parity Matrix** row-mean further down (~94.8%) has *not* been recomputed and is a mixed-methodology figure by its own admission; treat the function-level number above as the measure, and the matrix as indicative. Re-run the scan rather than trusting any figure written here.
 
 **Scoring methodology (Wave 6 re-baseline + Wave 7 Phase 0/B-series, 2026-08-01/03):** per-function behavioral accounting — an admitted fail-closed stub scores zero even when the name is present, macOS-only additions earn no extra credit, and an API the Windows reference itself never implemented (`Ext.Types.Construct` is `// TODO; return 0` at Types.inl:286) leaves the denominator as a matched contract — has so far been applied to the **Entity, Stats, and Types rows** via per-function diffs against the Windows registration blocks. The remaining rows still carry legacy scores measured against the macOS implementation surface, so the 94.8% row-mean is a mixed-methodology number and overstates rows the contract manifest scores lower (e.g. Debug 100% vs 3/8 behavioral, IMGUI 100% vs 2/7, StaticData 100% vs 2/5). The function-level manifest number below is the uniform measure; matrix rows convert to contract scoring as Wave 7 phases close their gaps. The prior 97.3% counted name presence. Full analysis: [docs/parity-100/SYNTHESIS.md](docs/parity-100/SYNTHESIS.md).
 
-**Contract manifest (Wave 7 scoring denominator):** [docs/parity-100/CONTRACT.md](docs/parity-100/CONTRACT.md) inventories 293 fixed Windows registrations plus the supplemental dynamic `Osi.DB_*:Delete` contract, with zero unclassified entries: 210 implemented, 70 behavioral gaps, 1 matched-upstream TODO, 13 excluded — **75.0% function-level behavioral parity** (`bg3se-harness parity scan --contract`). The matrix rows above remain namespace-level behavioral scores; the row-mean (~94.8%) is higher than the function-level number because the manifest surfaces gap clusters inside rows historically scored as complete (entity-proxy replication/subscription methods, Windows Utils/Debug surfaces, per-context Template modules). Recompute the overall row-mean after Wave 7 live verification.
+**Contract manifest (scoring denominator):** [docs/parity-100/CONTRACT.md](docs/parity-100/CONTRACT.md) inventories 293 fixed Windows registrations plus the supplemental dynamic `Osi.DB_*:Delete` contract, with zero unclassified entries. Current scan: **294 contracts — 270 implemented, 10 behavioral gaps, 1 matched-upstream TODO, 13 excluded, 96.4% of the 280 scored** (`bg3se-harness parity scan --contract`).
+
+The manifest itself is dated 2026-08-03, so surfaces added since may not be priced into the denominator — trust the direction of this number more than its last digit, and regenerate the manifest when that matters.
 
 **Deferral registry:** every intentionally fail-closed API is cataloged with evidence citations and unlock paths in [docs/deferrals.md](docs/deferrals.md).
 

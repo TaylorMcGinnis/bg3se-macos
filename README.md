@@ -132,7 +132,7 @@ Many more mods work out of the box. See **[docs/supported-mods.md](docs/supporte
 
 ## Status
 
-**Version:** v0.44.0 | **Feature Parity:** **92.9%** (260/280 scored) under behavioral accounting with per-function contract diffs (fail-closed stubs score zero, macOS-only extras earn no credit), sourced from the [roadmap matrix](ROADMAP.md#feature-parity-matrix) | **Deferrals:** [docs/deferrals.md](docs/deferrals.md)
+**Version:** v0.47.4 | **Feature Parity:** **96.4%** (270/280 scored) under behavioral accounting with per-function contract diffs (fail-closed stubs score zero, macOS-only extras earn no credit), measured by `bg3se-harness parity scan --contract` — not the roadmap matrix row-mean, which is a separate and looser figure | **Deferrals:** [docs/deferrals.md](docs/deferrals.md)
 
 | Feature | Status |
 |---------|--------|
@@ -140,7 +140,7 @@ Many more mods work out of the box. See **[docs/supported-mods.md](docs/supporte
 | Lua Runtime | ✅ Lua 5.4 with Ext API |
 | Mod Loading | ✅ PAK file reading, auto-detection |
 | Ext.Osiris | ✅ Event listeners, custom functions (NewCall/NewQuery/NewEvent/RaiseEvent/GetCustomFunctions), **server context guards** |
-| Ext.Entity | ✅ **19/26 Windows registrations (73.1%)**, GUID lookup, **Dual EntityWorld** (client + server), **1,999 components registered** (534 layouts: 169 verified + 365 generated), **1,577 ARM64 sizes** + **702 Windows estimates** = **1,730 total** (87% coverage), **CreateComponent, RemoveComponent, GetEntityType, GetSalt, GetIndex, GetNetId**[^entity-stubs] |
+| Ext.Entity | ✅ **26/26 Windows registrations (100%)**, GUID lookup, **Dual EntityWorld** (client + server), **2,011 components registered** (775 distinct layouts: 559 hand-verified, 320 compiler-computed, 216 hand-packed, overlapping), component sizes cross-checked against **281 harvested live from the engine's own `EntityStorageData::ComponentSizes`**, **CreateComponent, RemoveComponent, GetEntityType, GetSalt, GetIndex, GetNetId**. The entity *proxy* methods score separately at 18/21 (85.7%); the three gaps are `GetReplicationFlags`, `SetReplicationFlags` and `OnChanged`[^entity-stubs] |
 | Ext.Stats | ✅ **100% function-count parity; 50/52 behavioral (96.2%)** — 15,774 stats, Get/GetAll/Create/Sync, CopyFrom, SetRawAttribute, AddEnumerationValue, ExecuteFunctors, TreasureTable/TreasureCategory[^stats-stubs] |
 | Ext.Events | ✅ 33 events (13 lifecycle + 17 engine + 2 functor + 1 network) with Prevent pattern, **runtime mod attribution** + `!mod_diag` |
 | Ext.IO | ✅ LoadFile, SaveFile, **AddPathOverride, GetPathOverride** |
