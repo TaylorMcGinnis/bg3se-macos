@@ -65,8 +65,9 @@ namespace bg3se {
 
 // Exact, from upstream CoreLib/Base/BaseUtilities.h:155.
 template <class T> struct OverrideableProperty { T Value; bool IsOverridden; };
-// Empty bases (BaseUtilities.h:43, :54, :59).
-class Noncopyable {};
+// Empty CRTP bases (BaseUtilities.h:43, :54, :59). Noncopyable is used as
+// `Noncopyable<Object>`, so it has to be a template even though it adds nothing.
+template <class T> class Noncopyable {};
 class ProtectedGameObjectBase {};
 template <class T> class ProtectedGameObject : public ProtectedGameObjectBase {};
 
@@ -149,6 +150,11 @@ struct ivec3 { int x, y, z; };
 struct ivec4 { int x, y, z, w; };
 struct mat3 { float v[9]; };
 struct mat4 { float v[16]; };
+// Spelled glm::fvec3 at the use sites, so the aliases belong HERE, not in bg3se.
+using fvec2 = vec2;
+using fvec3 = vec3;
+using fvec4 = vec4;
+using aligned_vec4 = vec4;
 }
 
 namespace bg3se {
@@ -156,6 +162,19 @@ using fvec2 = glm::vec2;
 using fvec3 = glm::vec3;
 using fvec4 = glm::vec4;
 using aligned_vec4 = glm::vec4;
+
+// Referenced only through pointers, so a forward declaration is enough and
+// cannot affect any layout.
+struct Scene; struct Skeleton; struct PhysicsShape; struct PhysicsObject;
+struct IActionData; struct EffectHandler; struct CharacterTemplate;
+struct ItemTemplate; struct GameObjectTemplate; struct TextureResource;
+struct MaterialResource; struct VisualResource; struct EffectResource;
+struct SoundObjectId; struct ScratchBuffer; struct FloatKeyFrameProperty;
+struct FloatProperty; struct VariableIndex; struct QueueCS; struct PeerId;
+struct InitialTarget; struct SystemHookProc; struct GenomeVariant;
+template <class T> struct PagedArray { void* p[4]; };
+template <class K, class V> struct PagedHashMap { void* p[8]; };
+template <class T> struct LegacyArray { T* buf_; uint32_t size_; uint32_t cap_; };
 }
 """
 
@@ -210,31 +229,146 @@ def engine_class_of(body: str):
     return None
 
 
-def strip_body(body: str) -> str:
-    """Remove things that are not data members: methods, macros, statics."""
-    out = []
-    depth = 0
+def _units(body: str):
+    """Split a struct body into top-level declarations, brace-aware.
+
+    A unit is everything up to a `;` at depth 0, or a balanced `{...}` block
+    plus whatever trails it (so `struct X { ... } name;` stays one unit)."""
+    i, n = 0, len(body)
+    while i < n:
+        start, j, depth, saw_brace = i, i, 0, False
+        while j < n:
+            c = body[j]
+            if c == '/' and j + 1 < n and body[j + 1] == '/':
+                while j < n and body[j] != '\n':
+                    j += 1
+                continue
+            if c == '"' or c == "'":
+                q = c
+                j += 1
+                while j < n and body[j] != q:
+                    j += 2 if body[j] == '\\' else 1
+            elif c == '{':
+                depth += 1
+                saw_brace = True
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    j += 1
+                    while j < n and body[j] != ';' and body[j] != '\n':
+                        j += 1
+                    if j < n and body[j] == ';':
+                        j += 1
+                    break
+            elif c == ';' and depth == 0:
+                j += 1
+                break
+            j += 1
+        unit = body[start:j if j > start else n]
+        if unit.strip():
+            yield unit, saw_brace
+        i = j if j > start else n
+
+
+NESTED_TYPE = re.compile(r'^\s*(?:struct|class|union|enum)\b')
+DROP_LEADING = re.compile(
+    r'^\s*(static|using|typedef|friend|template|constexpr|explicit|virtual|'
+    r'inline|~|operator\b)')
+
+
+def _strip_preprocessor(body: str) -> str:
+    """Drop preprocessor directives, and `#if 0` blocks along with their content.
+
+    A struct body containing `#if 0 ... #endif` was fatal: the unit splitter
+    could drop the `#endif` with the surrounding unit, leaving an unterminated
+    conditional. Clang then swallowed the ENTIRE remainder of the translation
+    unit -- 3000 lines of struct definitions and every static_assert forcing
+    their layout -- and reported one "expected '}'" at end of file. Record
+    output collapsed from 2547 to 682 with nothing pointing at the cause."""
+    out, skip = [], 0
     for line in body.splitlines():
         s = line.strip()
-        # Drop component-registration macros (may span lines via trailing \ or ()
-        if STRIP_MACROS.match(line):
-            # consume until parens balance
-            depth = line.count('(') - line.count(')')
-            continue
-        if depth > 0:
-            depth += line.count('(') - line.count(')')
-            continue
-        if not s or s.startswith('//'):
-            continue
-        # methods, ctors, operators, statics, usings, friends
-        if re.match(r'^(static|inline|virtual|friend|using|typedef|template|'
-                    r'constexpr|explicit|~|operator)\b', s):
-            continue
-        if '(' in s and ')' in s and not re.search(r'\{[^}]*\}\s*;?\s*$', s):
-            # looks like a function declaration rather than a member with init
-            if re.search(r'\)\s*(const)?\s*(noexcept)?\s*[;{]', s):
+        if s.startswith('#'):
+            d = s[1:].lstrip()
+            if skip:
+                if d.startswith(('if', 'ifdef', 'ifndef')):
+                    skip += 1
+                elif d.startswith('endif'):
+                    skip -= 1
                 continue
-        out.append(line)
+            if re.match(r'if\s+0\b', d):
+                skip = 1
+            continue
+        if not skip:
+            out.append(line)
+    return '\n'.join(out)
+
+
+def _strip_reg_macros(body: str) -> str:
+    """Remove DEFINE_COMPONENT(...) and friends, matching parens.
+
+    These macro invocations carry NO trailing semicolon. The unit splitter
+    therefore ran past one looking for `;` and swallowed the member declared
+    after it, so every component lost its first field and its computed size came
+    out short -- 458 size-confirmed layouts collapsed to 15."""
+    out, i, n = [], 0, len(body)
+    while i < n:
+        m = STRIP_MACROS.search(body, i)
+        if not m:
+            out.append(body[i:])
+            break
+        out.append(body[i:m.start()])
+        j = body.index('(', m.start())
+        depth = 0
+        while j < n:
+            if body[j] == '(':
+                depth += 1
+            elif body[j] == ')':
+                depth -= 1
+                if depth == 0:
+                    j += 1
+                    break
+            j += 1
+        i = j
+    return ''.join(out)
+
+
+def strip_body(body: str) -> str:
+    """Keep data members and nested type definitions; drop everything else.
+
+    The previous version worked line by line, so it removed a method's SIGNATURE
+    and left its body behind -- orphaned braces and stray statements that
+    unbalanced the struct and cascaded into hundreds of phantom "unknown type"
+    errors further down the translation unit. Brace tracking is not optional
+    here."""
+    out = []
+    for unit, saw_brace in _units(_strip_reg_macros(_strip_preprocessor(body))):
+        s = re.sub(r'//[^\n]*', '', unit).strip()
+        if not s:
+            continue
+        if STRIP_MACROS.match(s):
+            continue
+        if NESTED_TYPE.match(s):
+            out.append(unit)          # nested type: may be a member's type
+            continue
+        if DROP_LEADING.match(s):
+            continue
+        if saw_brace:
+            continue                  # a function body, or an initialiser block
+        # Attributes carry parentheses of their own -- [[bg3::legacy(field_0)]]
+        # -- so they must come off BEFORE deciding whether this is a function.
+        # Testing first deleted every annotated member, which is precisely the
+        # 425 named fields the legacy oracle exists to check.
+        head = re.sub(r'\[\[.*?\]\]', '', s.split('=')[0], flags=re.S)
+        # A function POINTER is a data member and occupies 8 bytes --
+        # `void (*Callback)(int);` -- so the parenthesis test must not treat it
+        # as a function declaration, or the struct comes out short.
+        if re.search(r'\(\s*[*&]', head):
+            out.append(unit)
+            continue
+        if '(' in head and ')' in head:
+            continue                  # has a parameter list: a function
+        out.append(unit)
     return '\n'.join(out)
 
 
@@ -350,7 +484,13 @@ SHIM_TYPES = {
     'ComponentTypeIndex', 'ReplicationTypeIndex', 'SystemTypeIndex',
     'QueryIndex', 'ComponentTypeMask', 'TComponentTypeIndex', 'UnknownSignal',
     'FrameAllocator', 'fvec2', 'fvec3', 'fvec4', 'aligned_vec4', 'SRWLOCK',
-    'CRITICAL_SECTION',
+    'CRITICAL_SECTION', 'Scene', 'Skeleton', 'PhysicsShape', 'PhysicsObject',
+    'IActionData', 'EffectHandler', 'CharacterTemplate', 'ItemTemplate',
+    'GameObjectTemplate', 'TextureResource', 'MaterialResource',
+    'VisualResource', 'EffectResource', 'SoundObjectId', 'ScratchBuffer',
+    'FloatKeyFrameProperty', 'FloatProperty', 'VariableIndex', 'QueueCS',
+    'PeerId', 'InitialTarget', 'SystemHookProc', 'GenomeVariant',
+    'PagedArray', 'PagedHashMap', 'LegacyArray',
 }
 
 BUILTIN = {

@@ -455,3 +455,46 @@ component across all 2560 properties.
 Not yet done: 1005 structs still fail to compile (mostly types the shim lacks),
 140 layouts are uncorroborated because the binary reports no size for them, and
 13 fail the size check outright.
+
+### The extractor was silently truncating (2026-09-14)
+
+The first cut of `strip_body` worked line by line, which is not sufficient for
+C++. Three defects, each of which failed quietly:
+
+1. **Method bodies outlived their signatures.** Dropping the line `T* alloc(...)`
+   left `{ ... return ptr; }` behind as loose statements and orphaned braces.
+2. **`#if 0` blocks were split.** The unit splitter could drop an `#endif` with
+   the surrounding unit, leaving an unterminated conditional. Clang then consumed
+   the ENTIRE remainder of the translation unit -- roughly 3000 lines of struct
+   definitions and every `static_assert` forcing their layout -- and said so with
+   a single `expected '}'` pointing at end of file. Record output fell from 2547
+   to 682 with nothing indicating why.
+3. **`DEFINE_COMPONENT(...)` has no trailing semicolon.** The splitter ran past
+   it hunting for `;` and swallowed the member declared next, so every component
+   lost its first field. 458 size-confirmed layouts collapsed to 15.
+
+Two more, once the structure was right and members were being classified:
+
+- Attributes carry parentheses. Testing for a parameter list before stripping
+  `[[bg3::legacy(field_0)]]` deleted every annotated member -- exactly the 425
+  named fields the legacy oracle exists to check.
+- A function *pointer* is a data member. `void (*Callback)(int);` has parens but
+  occupies 8 bytes, and dropping it shortened the struct.
+
+All five present as a plausible-looking layout with a quietly wrong size, which
+is the same failure class the audit was opened to find. The size oracle caught
+every one -- a struct that loses a member stops reproducing the size the binary
+reports -- which is the argument for gating on it rather than trusting output.
+
+`strip_body` is now brace-aware: it splits a body into top-level units, keeps
+data members and nested type definitions, and drops functions with their bodies
+intact. Preprocessor directives and registration macros come off first, by
+balanced parens rather than by line.
+
+Net: 322 compiled layouts, 441 size-confirmed, 446 of 562 offset checks exact,
+and still **66 fields agreeing with the hand-verified layouts and none
+disagreeing**. 654 distinct components carry a layout; zero fields run past the
+end across 2482 properties.
+
+Remaining: 539 compile errors, mostly in non-component structs; 143 layouts the
+binary reports no size for; 33 that fail the size check.

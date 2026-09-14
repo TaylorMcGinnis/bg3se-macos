@@ -206,6 +206,30 @@ static const ComponentLayoutDef g_Cc_eoc__BoostInfoComponent_Layout = {
 };
 
 // ======================================================================
+// ls::CameraComponent
+// Size 0xb0 (176 bytes)
+// Checked: compiled sizeof reproduces ARM64 size 0xb0
+// ======================================================================
+
+static const ComponentPropertyDef g_Cc_ls__CameraComponent_Properties[] = {
+    { "MasterBehaviorType", 0x00, FIELD_TYPE_UINT32, 0, true },
+    { "ExposureSettingIndex", 0x10, FIELD_TYPE_INT32, 0, true },
+    { "Active", 0x14, FIELD_TYPE_BOOL, 0, true },
+    { "AcceptsInput", 0x15, FIELD_TYPE_BOOL, 0, true },
+    { "UseCameraPPSettings", 0x16, FIELD_TYPE_BOOL, 0, true },
+    { "UseSplitScreenFov", 0x17, FIELD_TYPE_BOOL, 0, true },
+};
+
+static const ComponentLayoutDef g_Cc_ls__CameraComponent_Layout = {
+    .componentName = "ls::CameraComponent",
+    .shortName = "Camera",
+    .componentTypeIndex = 0,
+    .componentSize = 0xb0,
+    .properties = g_Cc_ls__CameraComponent_Properties,
+    .propertyCount = sizeof(g_Cc_ls__CameraComponent_Properties) / sizeof(g_Cc_ls__CameraComponent_Properties[0]),
+};
+
+// ======================================================================
 // eoc::CanBeDisarmedComponent
 // Size 0x2 (2 bytes)
 // Checked: compiled sizeof reproduces ARM64 size 0x2
@@ -610,25 +634,6 @@ static const ComponentLayoutDef g_Cc_ls__ClusterRadiusComponent_Layout = {
     .componentSize = 0x4,
     .properties = g_Cc_ls__ClusterRadiusComponent_Properties,
     .propertyCount = sizeof(g_Cc_ls__ClusterRadiusComponent_Properties) / sizeof(g_Cc_ls__ClusterRadiusComponent_Properties[0]),
-};
-
-// ======================================================================
-// eoc::concentration::ConcentrationComponent
-// Size 0x50 (80 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0x50
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_eoc__concentration__ConcentrationComponent_Properties[] = {
-    { "Caster", 0x00, FIELD_TYPE_ENTITY_HANDLE, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_eoc__concentration__ConcentrationComponent_Layout = {
-    .componentName = "eoc::concentration::ConcentrationComponent",
-    .shortName = "Concentration",
-    .componentTypeIndex = 0,
-    .componentSize = 0x50,
-    .properties = g_Cc_eoc__concentration__ConcentrationComponent_Properties,
-    .propertyCount = sizeof(g_Cc_eoc__concentration__ConcentrationComponent_Properties) / sizeof(g_Cc_eoc__concentration__ConcentrationComponent_Properties[0]),
 };
 
 // ======================================================================
@@ -1671,104 +1676,6 @@ static const ComponentLayoutDef g_Cc_eoc__PathingDistanceChangedOneFrameComponen
 };
 
 // ======================================================================
-// ls::PhysicsComponent
-// Size 0x18 (24 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0x18
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_ls__PhysicsComponent_Properties[] = {
-    { "HasPhysics", 0x14, FIELD_TYPE_BOOL, 0, true },
-    { "field_15", 0x15, FIELD_TYPE_UINT8, 0, true },
-    { "IsClustered", 0x16, FIELD_TYPE_BOOL, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_ls__PhysicsComponent_Layout = {
-    .componentName = "ls::PhysicsComponent",
-    .shortName = "Physics",
-    .componentTypeIndex = 0,
-    .componentSize = 0x18,
-    .properties = g_Cc_ls__PhysicsComponent_Properties,
-    .propertyCount = sizeof(g_Cc_ls__PhysicsComponent_Properties) / sizeof(g_Cc_ls__PhysicsComponent_Properties[0]),
-};
-
-// ======================================================================
-// ls::PhysicsLoadComponent
-// Size 0x18 (24 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0x18
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_ls__PhysicsLoadComponent_Properties[] = {
-    { "field_10", 0x10, FIELD_TYPE_INT32, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_ls__PhysicsLoadComponent_Layout = {
-    .componentName = "ls::PhysicsLoadComponent",
-    .shortName = "PhysicsLoad",
-    .componentTypeIndex = 0,
-    .componentSize = 0x18,
-    .properties = g_Cc_ls__PhysicsLoadComponent_Properties,
-    .propertyCount = sizeof(g_Cc_ls__PhysicsLoadComponent_Properties) / sizeof(g_Cc_ls__PhysicsLoadComponent_Properties[0]),
-};
-
-// ======================================================================
-// ls::PhysicsLoaderRegisteredComponent
-// Size 0x4 (4 bytes)
-// Checked: no ARM64 size; every Windows self-named offset lands exactly
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_ls__PhysicsLoaderRegisteredComponent_Properties[] = {
-    { "field_0", 0x00, FIELD_TYPE_INT32, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_ls__PhysicsLoaderRegisteredComponent_Layout = {
-    .componentName = "ls::PhysicsLoaderRegisteredComponent",
-    .shortName = "PhysicsLoaderRegistered",
-    .componentTypeIndex = 0,
-    .componentSize = 0x4,
-    .properties = g_Cc_ls__PhysicsLoaderRegisteredComponent_Properties,
-    .propertyCount = sizeof(g_Cc_ls__PhysicsLoaderRegisteredComponent_Properties) / sizeof(g_Cc_ls__PhysicsLoaderRegisteredComponent_Properties[0]),
-};
-
-// ======================================================================
-// ls::PhysicsPathLoadDesciptionComponent
-// Size 0x18 (24 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0x18; a Windows field_XX name disagrees -- expected where MSVC and libc++ container widths differ
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_ls__PhysicsPathLoadDesciptionComponent_Properties[] = {
-    { "field_20", 0x10, FIELD_TYPE_UINT32, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_ls__PhysicsPathLoadDesciptionComponent_Layout = {
-    .componentName = "ls::PhysicsPathLoadDesciptionComponent",
-    .shortName = "PhysicsPathLoadDesciption",
-    .componentTypeIndex = 0,
-    .componentSize = 0x18,
-    .properties = g_Cc_ls__PhysicsPathLoadDesciptionComponent_Properties,
-    .propertyCount = sizeof(g_Cc_ls__PhysicsPathLoadDesciptionComponent_Properties) / sizeof(g_Cc_ls__PhysicsPathLoadDesciptionComponent_Properties[0]),
-};
-
-// ======================================================================
-// ls::PhysicsResourceLoadDesciptionComponent
-// Size 0x8 (8 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0x8
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_ls__PhysicsResourceLoadDesciptionComponent_Properties[] = {
-    { "PhysicsTemplate", 0x00, FIELD_TYPE_FIXEDSTRING, 0, true },
-    { "field_4", 0x04, FIELD_TYPE_BOOL, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_ls__PhysicsResourceLoadDesciptionComponent_Layout = {
-    .componentName = "ls::PhysicsResourceLoadDesciptionComponent",
-    .shortName = "PhysicsResourceLoadDesciption",
-    .componentTypeIndex = 0,
-    .componentSize = 0x8,
-    .properties = g_Cc_ls__PhysicsResourceLoadDesciptionComponent_Properties,
-    .propertyCount = sizeof(g_Cc_ls__PhysicsResourceLoadDesciptionComponent_Properties) / sizeof(g_Cc_ls__PhysicsResourceLoadDesciptionComponent_Properties[0]),
-};
-
-// ======================================================================
 // eoc::RaceComponent
 // Size 0x10 (16 bytes)
 // Checked: compiled sizeof reproduces ARM64 size 0x10
@@ -1808,53 +1715,6 @@ static const ComponentLayoutDef g_Cc_eoc__repose__StateComponent_Layout = {
     .componentSize = 0x30,
     .properties = g_Cc_eoc__repose__StateComponent_Properties,
     .propertyCount = sizeof(g_Cc_eoc__repose__StateComponent_Properties) / sizeof(g_Cc_eoc__repose__StateComponent_Properties[0]),
-};
-
-// ======================================================================
-// eoc::RequestedRollComponent
-// Size 0x1e0 (480 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0x1e0; a Windows field_XX name disagrees -- expected where MSVC and libc++ container widths differ
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_eoc__RequestedRollComponent_Properties[] = {
-    { "RollEntity", 0x00, FIELD_TYPE_ENTITY_HANDLE, 0, true },
-    { "RollUuid", 0x08, FIELD_TYPE_GUID, 0, true },
-    { "RollComponentType", 0x18, FIELD_TYPE_UINT8, 0, true },
-    { "RollType", 0x19, FIELD_TYPE_UINT8, 0, true },
-    { "Roller", 0x20, FIELD_TYPE_ENTITY_HANDLE, 0, true },
-    { "StatsExpression", 0x28, FIELD_TYPE_STDSTRING, 0, true },
-    { "DC", 0x39, FIELD_TYPE_UINT8, 0, true },
-    { "NaturalRoll", 0x3a, FIELD_TYPE_UINT8, 0, true },
-    { "DiscardedDiceTotal", 0x3b, FIELD_TYPE_UINT8, 0, true },
-    { "DiceAdditionalValue", 0x3c, FIELD_TYPE_UINT8, 0, true },
-    { "AdditionalValue", 0x40, FIELD_TYPE_INT32, 0, true },
-    { "SpellCheck", 0x44, FIELD_TYPE_UINT8, 0, true },
-    { "Finished", 0x45, FIELD_TYPE_BOOL, 0, true },
-    { "Canceled", 0x46, FIELD_TYPE_BOOL, 0, true },
-    { "field_4F", 0x47, FIELD_TYPE_UINT8, 0, true },
-    { "PassiveRollDelay", 0x48, FIELD_TYPE_FLOAT, 0, true },
-    { "RollContext", 0x4c, FIELD_TYPE_UINT8, 0, true },
-    { "FromScript", 0x4d, FIELD_TYPE_BOOL, 0, true },
-    { "DialogId", 0x50, FIELD_TYPE_INT32, 0, true },
-    { "Subject", 0x58, FIELD_TYPE_ENTITY_HANDLE, 0, true },
-    { "RolledComponentType0", 0x80, FIELD_TYPE_BOOL, 0, true },
-    { "field_89", 0x81, FIELD_TYPE_UINT8, 0, true },
-    { "field_8A", 0x82, FIELD_TYPE_UINT8, 0, true },
-    { "ConsumedInspirationPoint", 0x9a, FIELD_TYPE_BOOL, 0, true },
-    { "field_1B0", 0x1a8, FIELD_TYPE_STDSTRING, 0, true },
-    { "RollDelayRemaining", 0x1b8, FIELD_TYPE_FLOAT, 0, true },
-    { "RequestStop", 0x1bc, FIELD_TYPE_BOOL, 0, true },
-    { "EntityUuid", 0x1c0, FIELD_TYPE_GUID, 0, true },
-    { "Entity2Uuid", 0x1d0, FIELD_TYPE_GUID, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_eoc__RequestedRollComponent_Layout = {
-    .componentName = "eoc::RequestedRollComponent",
-    .shortName = "RequestedRoll",
-    .componentTypeIndex = 0,
-    .componentSize = 0x1e0,
-    .properties = g_Cc_eoc__RequestedRollComponent_Properties,
-    .propertyCount = sizeof(g_Cc_eoc__RequestedRollComponent_Properties) / sizeof(g_Cc_eoc__RequestedRollComponent_Properties[0]),
 };
 
 // ======================================================================
@@ -2106,25 +1966,6 @@ static const ComponentLayoutDef g_Cc_eoc__SyncedTimelineControlComponent_Layout 
 };
 
 // ======================================================================
-// ls::TimeFactorComponent
-// Size 0x4 (4 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0x4
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_ls__TimeFactorComponent_Properties[] = {
-    { "Value", 0x00, FIELD_TYPE_FLOAT, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_ls__TimeFactorComponent_Layout = {
-    .componentName = "ls::TimeFactorComponent",
-    .shortName = "TimeFactor",
-    .componentTypeIndex = 0,
-    .componentSize = 0x4,
-    .properties = g_Cc_ls__TimeFactorComponent_Properties,
-    .propertyCount = sizeof(g_Cc_ls__TimeFactorComponent_Properties) / sizeof(g_Cc_ls__TimeFactorComponent_Properties[0]),
-};
-
-// ======================================================================
 // eoc::TimelineActorDataComponent
 // Size 0x28 (40 bytes)
 // Checked: compiled sizeof reproduces ARM64 size 0x28
@@ -2337,28 +2178,6 @@ static const ComponentLayoutDef g_Cc_ls__VisualLoadDesciptionComponent_Layout = 
     .componentSize = 0x8,
     .properties = g_Cc_ls__VisualLoadDesciptionComponent_Properties,
     .propertyCount = sizeof(g_Cc_ls__VisualLoadDesciptionComponent_Properties) / sizeof(g_Cc_ls__VisualLoadDesciptionComponent_Properties[0]),
-};
-
-// ======================================================================
-// ls::VisualStreamComponent
-// Size 0x10 (16 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0x10
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_ls__VisualStreamComponent_Properties[] = {
-    { "field_0", 0x00, FIELD_TYPE_INT32, 0, true },
-    { "field_4", 0x04, FIELD_TYPE_INT32, 0, true },
-    { "field_8", 0x08, FIELD_TYPE_FLOAT, 0, true },
-    { "IsHLOD", 0x0c, FIELD_TYPE_BOOL, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_ls__VisualStreamComponent_Layout = {
-    .componentName = "ls::VisualStreamComponent",
-    .shortName = "VisualStream",
-    .componentTypeIndex = 0,
-    .componentSize = 0x10,
-    .properties = g_Cc_ls__VisualStreamComponent_Properties,
-    .propertyCount = sizeof(g_Cc_ls__VisualStreamComponent_Properties) / sizeof(g_Cc_ls__VisualStreamComponent_Properties[0]),
 };
 
 // ======================================================================
@@ -3030,6 +2849,27 @@ static const ComponentLayoutDef g_Cc_ecl__PaperdollComponent_Layout = {
     .componentSize = 0x10,
     .properties = g_Cc_ecl__PaperdollComponent_Properties,
     .propertyCount = sizeof(g_Cc_ecl__PaperdollComponent_Properties) / sizeof(g_Cc_ecl__PaperdollComponent_Properties[0]),
+};
+
+// ======================================================================
+// ecl::Scenery
+// Size 0x40 (64 bytes)
+// Checked: compiled sizeof reproduces ARM64 size 0x40
+// ======================================================================
+
+static const ComponentPropertyDef g_Cc_ecl__Scenery_Properties[] = {
+    { "Entity2", 0x00, FIELD_TYPE_ENTITY_HANDLE, 0, true },
+    { "Uuid", 0x20, FIELD_TYPE_GUID, 0, true },
+    { "Visual", 0x38, FIELD_TYPE_FIXEDSTRING, 0, true },
+};
+
+static const ComponentLayoutDef g_Cc_ecl__Scenery_Layout = {
+    .componentName = "ecl::Scenery",
+    .shortName = "Scenery",
+    .componentTypeIndex = 0,
+    .componentSize = 0x40,
+    .properties = g_Cc_ecl__Scenery_Properties,
+    .propertyCount = sizeof(g_Cc_ecl__Scenery_Properties) / sizeof(g_Cc_ecl__Scenery_Properties[0]),
 };
 
 // ======================================================================
@@ -4009,54 +3849,6 @@ static const ComponentLayoutDef g_Cc_esv__light__GameplayLightChangesComponent_L
     .componentSize = 0xc,
     .properties = g_Cc_esv__light__GameplayLightChangesComponent_Properties,
     .propertyCount = sizeof(g_Cc_esv__light__GameplayLightChangesComponent_Properties) / sizeof(g_Cc_esv__light__GameplayLightChangesComponent_Properties[0]),
-};
-
-// ======================================================================
-// esv::JumpFollowComponent
-// Size 0x150 (336 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0x150; a Windows field_XX name disagrees -- expected where MSVC and libc++ container widths differ
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_esv__JumpFollowComponent_Properties[] = {
-    { "field_0", 0x00, FIELD_TYPE_VEC3, 0, true },
-    { "field_C", 0x0c, FIELD_TYPE_VEC3, 0, true },
-    { "field_18", 0x18, FIELD_TYPE_INT32, 0, true },
-    { "field_1C", 0x1c, FIELD_TYPE_INT32, 0, true },
-    { "field_20", 0x20, FIELD_TYPE_INT32, 0, true },
-    { "field_24", 0x24, FIELD_TYPE_VEC3, 0, true },
-    { "field_30", 0x30, FIELD_TYPE_VEC3, 0, true },
-    { "field_3C", 0x3c, FIELD_TYPE_FLOAT, 0, true },
-    { "field_40", 0x40, FIELD_TYPE_FLOAT, 0, true },
-    { "field_44", 0x44, FIELD_TYPE_FLOAT, 0, true },
-    { "field_48", 0x48, FIELD_TYPE_UINT8, 0, true },
-    { "field_4C", 0x4c, FIELD_TYPE_FLOAT, 0, true },
-    { "ProjectileTerrainOffset", 0x88, FIELD_TYPE_FLOAT, 0, true },
-    { "field_D0", 0xe0, FIELD_TYPE_UINT8, 0, true },
-    { "field_D4", 0xe4, FIELD_TYPE_VEC3, 0, true },
-    { "field_E0", 0xf0, FIELD_TYPE_VEC3, 0, true },
-    { "field_EC", 0xfc, FIELD_TYPE_INT32, 0, true },
-    { "field_F8", 0x108, FIELD_TYPE_INT32, 0, true },
-    { "field_FC", 0x10c, FIELD_TYPE_VEC3, 0, true },
-    { "field_108", 0x118, FIELD_TYPE_VEC3, 0, true },
-    { "field_114", 0x124, FIELD_TYPE_INT32, 0, true },
-    { "field_118", 0x128, FIELD_TYPE_UINT8, 0, true },
-    { "field_11C", 0x12c, FIELD_TYPE_VEC3, 0, true },
-    { "field_128", 0x138, FIELD_TYPE_INT32, 0, true },
-    { "field_12C", 0x13c, FIELD_TYPE_INT32, 0, true },
-    { "field_130", 0x140, FIELD_TYPE_UINT32, 0, true },
-    { "field_134", 0x144, FIELD_TYPE_UINT32, 0, true },
-    { "field_138", 0x148, FIELD_TYPE_UINT8, 0, true },
-    { "field_139", 0x149, FIELD_TYPE_UINT8, 0, true },
-    { "field_13A", 0x14a, FIELD_TYPE_UINT8, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_esv__JumpFollowComponent_Layout = {
-    .componentName = "esv::JumpFollowComponent",
-    .shortName = "JumpFollow",
-    .componentTypeIndex = 0,
-    .componentSize = 0x150,
-    .properties = g_Cc_esv__JumpFollowComponent_Properties,
-    .propertyCount = sizeof(g_Cc_esv__JumpFollowComponent_Properties) / sizeof(g_Cc_esv__JumpFollowComponent_Properties[0]),
 };
 
 // ======================================================================
@@ -5427,26 +5219,6 @@ static const ComponentLayoutDef g_Cc_esv__status__UpdateTargetTrackingOneFrameCo
 };
 
 // ======================================================================
-// esv::summon::AddConcentrationRequestOneFrameComponent
-// Size 0x48 (72 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0x48; a Windows field_XX name disagrees -- expected where MSVC and libc++ container widths differ
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_esv__summon__AddConcentrationRequestOneFrameComponent_Properties[] = {
-    { "Caster", 0x38, FIELD_TYPE_ENTITY_HANDLE, 0, true },
-    { "UnsummonOnConcentrationBreak", 0x40, FIELD_TYPE_BOOL, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_esv__summon__AddConcentrationRequestOneFrameComponent_Layout = {
-    .componentName = "esv::summon::AddConcentrationRequestOneFrameComponent",
-    .shortName = "AddConcentrationRequestOneFrame",
-    .componentTypeIndex = 0,
-    .componentSize = 0x48,
-    .properties = g_Cc_esv__summon__AddConcentrationRequestOneFrameComponent_Properties,
-    .propertyCount = sizeof(g_Cc_esv__summon__AddConcentrationRequestOneFrameComponent_Properties) / sizeof(g_Cc_esv__summon__AddConcentrationRequestOneFrameComponent_Properties[0]),
-};
-
-// ======================================================================
 // esv::summon::AddToExistingConcentrationRequestOneFrameComponent
 // Size 0x10 (16 bytes)
 // Checked: compiled sizeof reproduces ARM64 size 0x10
@@ -5643,27 +5415,6 @@ static const ComponentLayoutDef g_Cc_esv__unsheath__DefaultComponent_Layout = {
 };
 
 // ======================================================================
-// esv::unsheath::SpellAnimationLifetimeComponent
-// Size 0x50 (80 bytes)
-// Checked: no ARM64 size; every Windows self-named offset lands exactly
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_esv__unsheath__SpellAnimationLifetimeComponent_Properties[] = {
-    { "SpellCastGuid", 0x38, FIELD_TYPE_GUID, 0, true },
-    { "field_48", 0x48, FIELD_TYPE_UINT8, 0, true },
-    { "field_4C", 0x4c, FIELD_TYPE_FLOAT, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_esv__unsheath__SpellAnimationLifetimeComponent_Layout = {
-    .componentName = "esv::unsheath::SpellAnimationLifetimeComponent",
-    .shortName = "SpellAnimationLifetime",
-    .componentTypeIndex = 0,
-    .componentSize = 0x50,
-    .properties = g_Cc_esv__unsheath__SpellAnimationLifetimeComponent_Properties,
-    .propertyCount = sizeof(g_Cc_esv__unsheath__SpellAnimationLifetimeComponent_Properties) / sizeof(g_Cc_esv__unsheath__SpellAnimationLifetimeComponent_Properties[0]),
-};
-
-// ======================================================================
 // eoc::floor::InfoComponent
 // Size 0x20 (32 bytes)
 // Checked: compiled sizeof reproduces ARM64 size 0x20
@@ -5746,7 +5497,7 @@ static const ComponentLayoutDef g_Cc_eoc__hit__ProxyComponent_Layout = {
 
 // ======================================================================
 // eoc::hit::TargetComponent
-// Size 0xb8 (184 bytes)
+// Size 0x78 (120 bytes)
 // Checked: no ARM64 size; every Windows self-named offset lands exactly
 // ======================================================================
 
@@ -5759,7 +5510,7 @@ static const ComponentLayoutDef g_Cc_eoc__hit__TargetComponent_Layout = {
     .componentName = "eoc::hit::TargetComponent",
     .shortName = "Target",
     .componentTypeIndex = 0,
-    .componentSize = 0xb8,
+    .componentSize = 0x78,
     .properties = g_Cc_eoc__hit__TargetComponent_Properties,
     .propertyCount = sizeof(g_Cc_eoc__hit__TargetComponent_Properties) / sizeof(g_Cc_eoc__hit__TargetComponent_Properties[0]),
 };
@@ -5783,25 +5534,6 @@ static const ComponentLayoutDef g_Cc_ls__InstancingGroupVisualComponent_Layout =
     .componentSize = 0x18,
     .properties = g_Cc_ls__InstancingGroupVisualComponent_Properties,
     .propertyCount = sizeof(g_Cc_ls__InstancingGroupVisualComponent_Properties) / sizeof(g_Cc_ls__InstancingGroupVisualComponent_Properties[0]),
-};
-
-// ======================================================================
-// eoc::interrupt::ActionStateComponent
-// Size 0x128 (296 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0x128
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_eoc__interrupt__ActionStateComponent_Properties[] = {
-    { "SpellCastGuid", 0x118, FIELD_TYPE_GUID, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_eoc__interrupt__ActionStateComponent_Layout = {
-    .componentName = "eoc::interrupt::ActionStateComponent",
-    .shortName = "ActionState",
-    .componentTypeIndex = 0,
-    .componentSize = 0x128,
-    .properties = g_Cc_eoc__interrupt__ActionStateComponent_Properties,
-    .propertyCount = sizeof(g_Cc_eoc__interrupt__ActionStateComponent_Properties) / sizeof(g_Cc_eoc__interrupt__ActionStateComponent_Properties[0]),
 };
 
 // ======================================================================
@@ -6461,25 +6193,6 @@ static const ComponentLayoutDef g_Cc_eoc__progression__ReplicatedFeatComponent_L
 };
 
 // ======================================================================
-// eoc::projectile::SourceInfoComponent
-// Size 0x40 (64 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0x40
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_eoc__projectile__SourceInfoComponent_Properties[] = {
-    { "Entity", 0x38, FIELD_TYPE_ENTITY_HANDLE, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_eoc__projectile__SourceInfoComponent_Layout = {
-    .componentName = "eoc::projectile::SourceInfoComponent",
-    .shortName = "SourceInfo",
-    .componentTypeIndex = 0,
-    .componentSize = 0x40,
-    .properties = g_Cc_eoc__projectile__SourceInfoComponent_Properties,
-    .propertyCount = sizeof(g_Cc_eoc__projectile__SourceInfoComponent_Properties) / sizeof(g_Cc_eoc__projectile__SourceInfoComponent_Properties[0]),
-};
-
-// ======================================================================
 // eoc::shapeshift::AnimationComponent
 // Size 0x8 (8 bytes)
 // Checked: compiled sizeof reproduces ARM64 size 0x8
@@ -6831,31 +6544,6 @@ static const ComponentLayoutDef g_Cc_eoc__spell_cast__MovementComponent_Layout =
 };
 
 // ======================================================================
-// eoc::spell_cast::StateComponent
-// Size 0xc0 (192 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0xc0; a Windows field_XX name disagrees -- expected where MSVC and libc++ container widths differ
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_eoc__spell_cast__StateComponent_Properties[] = {
-    { "Entity", 0x00, FIELD_TYPE_ENTITY_HANDLE, 0, true },
-    { "Caster", 0x08, FIELD_TYPE_ENTITY_HANDLE, 0, true },
-    { "CasterStartPosition", 0x80, FIELD_TYPE_VEC3, 0, true },
-    { "Source", 0x90, FIELD_TYPE_ENTITY_HANDLE, 0, true },
-    { "Random", 0x98, FIELD_TYPE_UINT32, 0, true },
-    { "SpellCastGuid", 0xa0, FIELD_TYPE_GUID, 0, true },
-    { "NetGuid", 0xb0, FIELD_TYPE_STDSTRING, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_eoc__spell_cast__StateComponent_Layout = {
-    .componentName = "eoc::spell_cast::StateComponent",
-    .shortName = "State",
-    .componentTypeIndex = 0,
-    .componentSize = 0xc0,
-    .properties = g_Cc_eoc__spell_cast__StateComponent_Properties,
-    .propertyCount = sizeof(g_Cc_eoc__spell_cast__StateComponent_Properties) / sizeof(g_Cc_eoc__spell_cast__StateComponent_Properties[0]),
-};
-
-// ======================================================================
 // eoc::status::CauseComponent
 // Size 0x8 (8 bytes)
 // Checked: compiled sizeof reproduces ARM64 size 0x8
@@ -7009,7 +6697,7 @@ static const ComponentLayoutDef g_Cc_eoc__trigger__TypeComponent_Layout = {
     .propertyCount = sizeof(g_Cc_eoc__trigger__TypeComponent_Properties) / sizeof(g_Cc_eoc__trigger__TypeComponent_Properties[0]),
 };
 
-#define COMPILED_COMPONENT_COUNT 335
+#define COMPILED_COMPONENT_COUNT 322
 
 static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_eoc__light__ActiveCharacterLightComponent_Layout,
@@ -7021,6 +6709,7 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_eoc__BodyTypeComponent_Layout,
     &g_Cc_eoc__BoostConditionComponent_Layout,
     &g_Cc_eoc__BoostInfoComponent_Layout,
+    &g_Cc_ls__CameraComponent_Layout,
     &g_Cc_eoc__CanBeDisarmedComponent_Layout,
     &g_Cc_eoc__CanBeLootedComponent_Layout,
     &g_Cc_eoc__CanDeflectProjectilesComponent_Layout,
@@ -7042,7 +6731,6 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_ls__ClusterPositionYComponent_Layout,
     &g_Cc_ls__ClusterPositionZComponent_Layout,
     &g_Cc_ls__ClusterRadiusComponent_Layout,
-    &g_Cc_eoc__concentration__ConcentrationComponent_Layout,
     &g_Cc_ls__CullComponent_Layout,
     &g_Cc_eoc__CustomNameComponent_Layout,
     &g_Cc_eoc__DarknessComponent_Layout,
@@ -7093,14 +6781,8 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_eoc__PassiveComponent_Layout,
     &g_Cc_eoc__PathingComponent_Layout,
     &g_Cc_eoc__PathingDistanceChangedOneFrameComponent_Layout,
-    &g_Cc_ls__PhysicsComponent_Layout,
-    &g_Cc_ls__PhysicsLoadComponent_Layout,
-    &g_Cc_ls__PhysicsLoaderRegisteredComponent_Layout,
-    &g_Cc_ls__PhysicsPathLoadDesciptionComponent_Layout,
-    &g_Cc_ls__PhysicsResourceLoadDesciptionComponent_Layout,
     &g_Cc_eoc__RaceComponent_Layout,
     &g_Cc_eoc__repose__StateComponent_Layout,
-    &g_Cc_eoc__RequestedRollComponent_Layout,
     &g_Cc_eoc__ResistancesComponent_Layout,
     &g_Cc_eoc__ruleset__RulesetComponent_Layout,
     &g_Cc_eoc__through__ShootThroughTypeComponent_Layout,
@@ -7112,7 +6794,6 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_eoc__SteeringComponent_Layout,
     &g_Cc_eoc__SyncedTimelineActorControlComponent_Layout,
     &g_Cc_eoc__SyncedTimelineControlComponent_Layout,
-    &g_Cc_ls__TimeFactorComponent_Layout,
     &g_Cc_eoc__TimelineActorDataComponent_Layout,
     &g_Cc_eoc__unsheath__StateComponent_Layout,
     &g_Cc_eoc__UseComponent_Layout,
@@ -7123,7 +6804,6 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_ls__VisualAttachRequestOneFrameComponent_Layout,
     &g_Cc_ls__VisualComponent_Layout,
     &g_Cc_ls__VisualLoadDesciptionComponent_Layout,
-    &g_Cc_ls__VisualStreamComponent_Layout,
     &g_Cc_eoc__VoiceComponent_Layout,
     &g_Cc_eoc__WeaponComponent_Layout,
     &g_Cc_eoc__WieldingComponent_Layout,
@@ -7154,6 +6834,7 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_ecl__EquipmentVisualsComponent_Layout,
     &g_Cc_ecl__GameCameraBehavior_Layout,
     &g_Cc_ecl__PaperdollComponent_Layout,
+    &g_Cc_ecl__Scenery_Layout,
     &g_Cc_ecl__TLPreviewDummy_Layout,
     &g_Cc_ecl__camera__PhotoModeCameraInputComponent_Layout,
     &g_Cc_ecl__character_creation__DefinitionStateComponent_Layout,
@@ -7200,7 +6881,6 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_esv__exp__ExperienceGaveOutComponent_Layout,
     &g_Cc_esv__GameTimerComponent_Layout,
     &g_Cc_esv__light__GameplayLightChangesComponent_Layout,
-    &g_Cc_esv__JumpFollowComponent_Layout,
     &g_Cc_esv__stats__proficiency__ProficiencyGroupStatsComponent_Layout,
     &g_Cc_esv__recruit__RecruitedByComponent_Layout,
     &g_Cc_esv__replication__ReplicationDependencyComponent_Layout,
@@ -7268,7 +6948,6 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_esv__status__RemoveEventOneFrameComponent_Layout,
     &g_Cc_esv__status__StatusComponent_Layout,
     &g_Cc_esv__status__UpdateTargetTrackingOneFrameComponent_Layout,
-    &g_Cc_esv__summon__AddConcentrationRequestOneFrameComponent_Layout,
     &g_Cc_esv__summon__AddToExistingConcentrationRequestOneFrameComponent_Layout,
     &g_Cc_esv__summon__AttachToProjectileRequestOneFrameComponent_Layout,
     &g_Cc_esv__summon__OwnerSetEventOneFrameComponent_Layout,
@@ -7279,14 +6958,12 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_esv__trigger__EventConfigComponent_Layout,
     &g_Cc_esv__trigger__RegistrationSettingsComponent_Layout,
     &g_Cc_esv__unsheath__DefaultComponent_Layout,
-    &g_Cc_esv__unsheath__SpellAnimationLifetimeComponent_Layout,
     &g_Cc_eoc__floor__InfoComponent_Layout,
     &g_Cc_eoc__hit__LifetimeComponent_Layout,
     &g_Cc_eoc__hit__MetaComponent_Layout,
     &g_Cc_eoc__hit__ProxyComponent_Layout,
     &g_Cc_eoc__hit__TargetComponent_Layout,
     &g_Cc_ls__InstancingGroupVisualComponent_Layout,
-    &g_Cc_eoc__interrupt__ActionStateComponent_Layout,
     &g_Cc_eoc__interrupt__ConditionallyDisabledComponent_Layout,
     &g_Cc_eoc__interrupt__DataComponent_Layout,
     &g_Cc_eoc__interrupt__PreparedComponent_Layout,
@@ -7320,7 +6997,6 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_eoc__progression__FeatComponent_Layout,
     &g_Cc_eoc__progression__MetaComponent_Layout,
     &g_Cc_eoc__progression__ReplicatedFeatComponent_Layout,
-    &g_Cc_eoc__projectile__SourceInfoComponent_Layout,
     &g_Cc_eoc__shapeshift__AnimationComponent_Layout,
     &g_Cc_eoc__shapeshift__RecoveryAnimationComponent_Layout,
     &g_Cc_eoc__sight__DataComponent_Layout,
@@ -7338,7 +7014,6 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_eoc__spell_cast__InterruptResultsComponent_Layout,
     &g_Cc_eoc__spell_cast__IsCastingComponent_Layout,
     &g_Cc_eoc__spell_cast__MovementComponent_Layout,
-    &g_Cc_eoc__spell_cast__StateComponent_Layout,
     &g_Cc_eoc__status__CauseComponent_Layout,
     &g_Cc_eoc__status__IDComponent_Layout,
     &g_Cc_eoc__status__IncapacitatedComponent_Layout,
