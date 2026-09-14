@@ -2,7 +2,78 @@
 
 All notable changes to BG3SE-macOS are documented here.
 
-## Unreleased
+## v0.47.5 - 2026-09-14
+
+- **357 component fields were reading the wrong address.** The offsets in
+  `generated_property_defs.h` are computed by `tools/generate_layouts.py`, and
+  `calculate_offsets` computed them wrong: `parse_type` returns `(None, size)`
+  for a field Lua cannot surface -- a pointer, a container, a string -- where
+  `None` means "do not expose" and `size` means "but it still occupies this
+  much space". The loop honoured the `None` and discarded the size, never
+  advancing the cursor, so every field after a skipped one sat low by exactly
+  that field's width. `esv::Projectile` begins with a vtable pointer, so all 48
+  of its fields were off by 8. 79 of 293 layouts were affected; none ever threw,
+  because each returned a plausible value of the right type from the wrong
+  place. The `eoc::DifficultyCheckComponent` fix made by hand earlier was this
+  same bug, mistaken for a one-off.
+
+  Three more defects in the same function: `STDString` sized 32 and
+  `TranslatedString` 40 (Windows values; this build's are 16 and 0x20),
+  alignment as `min(size, 8)` which over-aligns `glm::vec3`, and any qualified
+  type whose name contained `Type`/`Id`/`Flags` guessed at 4 bytes when enums
+  here are frequently 1.
+
+- **Offsets are now computed by the compiler.** `tools/compile_layouts.py`
+  extracts upstream's struct and enum declarations, compiles them for arm64
+  against a shim carrying this build's verified container widths, and reads the
+  offsets out of clang's `-fdump-record-layouts`. That covers what no hand
+  packer can model: base classes and vtables, bitfields,
+  `std::array`/`optional`/`variant`, padding, and real enum widths -- upstream
+  declares every one (`BEGIN_ENUM(DamageType, uint8_t)`), and guessing them is
+  what forced 251 components to truncate to nothing.
+
+  Nothing ships unless an oracle corroborates it, because a missing layout reads
+  as nil and a wrong one reads as a number. Upstream names unidentified fields
+  after their own offset (`field_1B0` sits at 0x1B0) and annotates renamed ones
+  with the name they used to carry (`[[bg3::legacy(field_4)]]`), giving 425
+  checks that cover fields with real names. Across the components that also have
+  a hand-verified layout, clang reproduces **66 offsets with none disagreeing**.
+  Where the two pipelines differed, upstream's own annotations sided with the
+  compiler both times (`AvatarComponent.UserID` 0x0 not 0x4;
+  `PassiveComponent.PassiveId` 0x4 not 0x18).
+
+- **Component sizes now come from the running game.** `Ext.Entity.GetComponentSizes()`
+  reads `EntityStorageData::ComponentSizes` -- the stride the ECS actually
+  addresses by -- and `tools/harvest_component_sizes.py` captures it for both
+  generators to validate against. The static table it replaces was sound (210 of
+  212 agreed) but incomplete and wrong in places, and the disagreements mattered:
+
+  - `eoc::DisplayNameComponent` is **0x20, not the 0x40 recorded as "ARM64
+    verified"** -- one `TranslatedString`, not two. `Title`, `UnknownKey` and
+    `TitleHandle` sat at 0x20 reading the *next entity's* component, which is
+    why a live read returned `TitleHandle=471061120`. Removed.
+  - `eoc::IgnoreResistanceBoostComponent` is **2 bytes, not 0x18**. Upstream
+    declares no struct for it at all, only the enum name, so the old layout came
+    from a stale Windows source. `DamageType` typed INT32 at 0x00 read 4 bytes
+    out of a 2-byte component and returned values like 604443143; it now reads
+    1/3/7 as it should.
+  - `eoc::combat::StateComponent` 0xD8 -> 0x98, `eoc::hit::TargetComponent`
+    0x18 -> 0xb8, `eoc::exp::ExperienceComponent` 0x18 -> 0x10, and
+    `eoc::inventory::ContainerComponent` 0x48 -> 0x40 (exactly one HashMap,
+    which independently confirms that width).
+
+  Both of the layouts that were reading past the end of their component were in
+  the *hand-verified* file -- the ones this port trusts most -- because they had
+  been checked against a static extraction rather than against the engine.
+
+  Sweep is now clean: 0 fields read past their component, and every layout with
+  a live size declares that size.
+
+- **284 components were registered but unreachable by upstream's name**, and 181
+  tag components plus all 103 boost components were missing from the generated
+  name table entirely.
+
+## Unreleased (earlier, same cycle)
 
 - **Appearance Edit Enhanced works end to end.** Three gaps blocked it, each hit
   in turn as the previous one was fixed:
