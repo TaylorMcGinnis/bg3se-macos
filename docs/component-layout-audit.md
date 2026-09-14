@@ -26,13 +26,20 @@ both names resolve** — verified on `CharacterCreationStats`, `AttributeFlags`,
 generalised from six samples that happened to be covered. The fallback is only
 as good as the table, and the table had two holes:
 
-1. **All 103 boost components were missing.** Upstream declares them through a
-   `DEFN_BOOST` macro (`Base/Base.h:84`), so the literal Lua name never appears
-   in the headers and the generator — which scanned for `DEFINE_COMPONENT` — saw
-   none of them. `e.WeaponDamageBoost` was nil while
-   `e.WeaponDamageBoostComponent` worked. Fixed in the generator, which derives
-   both strings exactly from the macro (`#name "Boost"` and
-   `"eoc::" #name "BoostComponent"`): 783 → 887 entries.
+1. **284 components were missing — over a quarter of the total.** The generator
+   scanned for `DEFINE_COMPONENT(name, "class")`, but two macros declare
+   components without a quoted class string, so it saw neither:
+
+   | Macro | Shape | Count |
+   |---|---|---|
+   | `DEFN_BOOST` (`Base/Base.h:84`) | builds the name by token-pasting: `#name "Boost"`, `"eoc::" #name "BoostComponent"` | 103 |
+   | `DEFINE_TAG_COMPONENT` (`:64`, `:74`) | three bare identifiers: name is the 3rd arg, class is `ns::name` | 181 |
+
+   `e.WeaponDamageBoost` was nil while `e.WeaponDamageBoostComponent` worked.
+   Both are fixed in the **generator**, deriving the strings exactly as the
+   macros expand them, so the fix survives regeneration: 783 → **1067** entries.
+   Verified live — `ServerStatusBoostsProcessed` 14912, `SpellCastCanBeTargeted`
+   24629, `AnubisEnabled` 1656, all previously 0.
 2. **`Ext.Entity.GetAllEntitiesWithComponent` never consulted the table at all.**
    It resolved through the class-name-keyed registry plus two hardcoded aliases,
    so `GetAllEntitiesWithComponent("AbilityBoost")` returned an empty table while
