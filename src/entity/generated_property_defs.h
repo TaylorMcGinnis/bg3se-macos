@@ -1659,8 +1659,8 @@ static const ComponentLayoutDef g_Gen_eoc_character_creation_definition_Creation
 // ======================================================================
 // eoc::character_creation::definition::LevelUpComponent
 // Field names/order from Windows BG3SE headers; offsets computed here.
-// Size: 0x18 (24 bytes) - Windows estimate
-// Checked: no ARM64 size available; every self-named offset lands exactly, size is the Windows estimate
+// ARM64 Size: 0x18 (24 bytes) - Ghidra verified
+// Checked: every self-named offset lands exactly
 // ======================================================================
 
 static const ComponentPropertyDef g_Gen_eoc_character_creation_definition_LevelUpComponent_Properties[] = {
@@ -1883,6 +1883,26 @@ static const ComponentLayoutDef g_Gen_eoc_ftb_ZoneBlockReasonComponent_Layout = 
 };
 
 // ======================================================================
+// eoc::hit::AttackerComponent
+// Field names/order from Windows BG3SE headers; offsets computed here.
+// ARM64 Size: 0x8 (8 bytes) - Ghidra verified
+// Checked: packing reproduces ARM64 size 0x8 exactly
+// ======================================================================
+
+static const ComponentPropertyDef g_Gen_eoc_hit_AttackerComponent_Properties[] = {
+    { "Attacker", 0x00, FIELD_TYPE_ENTITY_HANDLE, 0, true },
+};
+
+static const ComponentLayoutDef g_Gen_eoc_hit_AttackerComponent_Layout = {
+    .componentName = "eoc::hit::AttackerComponent",
+    .shortName = "Attacker",
+    .componentTypeIndex = 0,
+    .componentSize = 0x8,
+    .properties = g_Gen_eoc_hit_AttackerComponent_Properties,
+    .propertyCount = sizeof(g_Gen_eoc_hit_AttackerComponent_Properties) / sizeof(g_Gen_eoc_hit_AttackerComponent_Properties[0]),
+};
+
+// ======================================================================
 // eoc::hit::LifetimeComponent
 // Field names/order from Windows BG3SE headers; offsets computed here.
 // ARM64 Size: 0x8 (8 bytes) - Ghidra verified
@@ -1963,6 +1983,26 @@ static const ComponentLayoutDef g_Gen_eoc_hit_TargetComponent_Layout = {
     .componentSize = 0xb8,
     .properties = g_Gen_eoc_hit_TargetComponent_Properties,
     .propertyCount = sizeof(g_Gen_eoc_hit_TargetComponent_Properties) / sizeof(g_Gen_eoc_hit_TargetComponent_Properties[0]),
+};
+
+// ======================================================================
+// eoc::hit::WeaponComponent
+// Field names/order from Windows BG3SE headers; offsets computed here.
+// ARM64 Size: 0x8 (8 bytes) - Ghidra verified
+// Checked: packing reproduces ARM64 size 0x8 exactly
+// ======================================================================
+
+static const ComponentPropertyDef g_Gen_eoc_hit_WeaponComponent_Properties[] = {
+    { "Weapon", 0x00, FIELD_TYPE_ENTITY_HANDLE, 0, true },
+};
+
+static const ComponentLayoutDef g_Gen_eoc_hit_WeaponComponent_Layout = {
+    .componentName = "eoc::hit::WeaponComponent",
+    .shortName = "Weapon",
+    .componentTypeIndex = 0,
+    .componentSize = 0x8,
+    .properties = g_Gen_eoc_hit_WeaponComponent_Properties,
+    .propertyCount = sizeof(g_Gen_eoc_hit_WeaponComponent_Properties) / sizeof(g_Gen_eoc_hit_WeaponComponent_Properties[0]),
 };
 
 // ======================================================================
@@ -4557,7 +4597,7 @@ static const ComponentLayoutDef g_Gen_ls_uuid_Component_Layout = {
     .propertyCount = sizeof(g_Gen_ls_uuid_Component_Properties) / sizeof(g_Gen_ls_uuid_Component_Properties[0]),
 };
 
-#define GENERATED_COMPONENT_COUNT 214
+#define GENERATED_COMPONENT_COUNT 216
 
 static const ComponentLayoutDef* g_GeneratedComponentLayouts[] = {
     &g_Gen_ecl_CharacterIconRequestComponent_Layout,
@@ -4647,10 +4687,12 @@ static const ComponentLayoutDef* g_GeneratedComponentLayouts[] = {
     &g_Gen_eoc_encumbrance_StateComponent_Layout,
     &g_Gen_eoc_exp_AvailableLevelComponent_Layout,
     &g_Gen_eoc_ftb_ZoneBlockReasonComponent_Layout,
+    &g_Gen_eoc_hit_AttackerComponent_Layout,
     &g_Gen_eoc_hit_LifetimeComponent_Layout,
     &g_Gen_eoc_hit_MetaComponent_Layout,
     &g_Gen_eoc_hit_ProxyComponent_Layout,
     &g_Gen_eoc_hit_TargetComponent_Layout,
+    &g_Gen_eoc_hit_WeaponComponent_Layout,
     &g_Gen_eoc_hotbar_ContainerComponent_Layout,
     &g_Gen_eoc_identity_IdentityComponent_Layout,
     &g_Gen_eoc_identity_OriginalIdentityComponent_Layout,

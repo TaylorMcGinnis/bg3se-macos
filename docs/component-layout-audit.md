@@ -630,3 +630,32 @@ Coverage remains save-dependent (155 of 654 have a live size). Running
 `tools/harvest_component_sizes.py` on saves with different content is the way to
 extend it; harvests merge, and a component reporting two different sizes for one
 build would be flagged rather than silently overwritten.
+
+### Third harvest: in combat (2026-09-14)
+
+Harvesting during an active battle (46 entities in combat) added 24 components no
+earlier save carried -- `eoc::combat::StateComponent`, `combat::IsInCombat`,
+`hit::AttackerComponent`, `hit::WeaponComponent`, the `analytics::Event*` family,
+`character_creation::LevelUpDefinitionComponent` (816 bytes) and others. 281
+sizes total, still **no conflicts** across three harvests.
+
+Several of those were already on this audit's suspect lists --
+`combat::StateComponent` was a tainted hand-packed layout, `hit::AttackerComponent`
+was dropped as proven wrong -- so combat is worth harvesting specifically.
+
+One more correction fell out: `eoc::combat::StateComponent` declared **0xD8
+against a real 0x98**, one HashMap too many, taken from the Windows headers. Its
+single exposed field reads correctly (`MyGuid = e5a2bd69-d350-9a73-a5d7-...`
+live), so this was size-only -- but `componentSize` gates the bounds check, and
+an over-large one licenses a future field to be added out of bounds.
+
+After it: **165 layouts checkable against a live size, 0 overruns, 0 size
+mismatches**, across 656 components carrying a layout.
+
+### Where the harvest is worth repeating
+
+Coverage is save-dependent, so the useful habit is to harvest from states the
+previous ones did not cover. Combat added 24; a different act, camp, character
+creation, or a dialogue would each likely add their own. Harvests merge, and a
+component reporting two sizes for one build is flagged rather than overwritten --
+so repeating this is safe and monotonic.

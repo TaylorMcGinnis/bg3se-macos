@@ -2478,7 +2478,7 @@ static const ComponentLayoutDef g_Cc_eoc__character_creation__definition__FullRe
 // ======================================================================
 // eoc::character_creation::definition::LevelUpComponent
 // Size 0x18 (24 bytes)
-// Checked: no ARM64 size; every Windows self-named offset lands exactly
+// Checked: compiled sizeof reproduces ARM64 size 0x18
 // ======================================================================
 
 static const ComponentPropertyDef g_Cc_eoc__character_creation__definition__LevelUpComponent_Properties[] = {
@@ -5369,6 +5369,25 @@ static const ComponentLayoutDef g_Cc_eoc__floor__InfoComponent_Layout = {
 };
 
 // ======================================================================
+// eoc::hit::AttackerComponent
+// Size 0x8 (8 bytes)
+// Checked: compiled sizeof reproduces ARM64 size 0x8
+// ======================================================================
+
+static const ComponentPropertyDef g_Cc_eoc__hit__AttackerComponent_Properties[] = {
+    { "Attacker", 0x00, FIELD_TYPE_ENTITY_HANDLE, 0, true },
+};
+
+static const ComponentLayoutDef g_Cc_eoc__hit__AttackerComponent_Layout = {
+    .componentName = "eoc::hit::AttackerComponent",
+    .shortName = "Attacker",
+    .componentTypeIndex = 0,
+    .componentSize = 0x8,
+    .properties = g_Cc_eoc__hit__AttackerComponent_Properties,
+    .propertyCount = sizeof(g_Cc_eoc__hit__AttackerComponent_Properties) / sizeof(g_Cc_eoc__hit__AttackerComponent_Properties[0]),
+};
+
+// ======================================================================
 // eoc::hit::LifetimeComponent
 // Size 0x8 (8 bytes)
 // Checked: compiled sizeof reproduces ARM64 size 0x8
@@ -5425,6 +5444,25 @@ static const ComponentLayoutDef g_Cc_eoc__hit__ProxyComponent_Layout = {
     .componentSize = 0x10,
     .properties = g_Cc_eoc__hit__ProxyComponent_Properties,
     .propertyCount = sizeof(g_Cc_eoc__hit__ProxyComponent_Properties) / sizeof(g_Cc_eoc__hit__ProxyComponent_Properties[0]),
+};
+
+// ======================================================================
+// eoc::hit::WeaponComponent
+// Size 0x8 (8 bytes)
+// Checked: compiled sizeof reproduces ARM64 size 0x8
+// ======================================================================
+
+static const ComponentPropertyDef g_Cc_eoc__hit__WeaponComponent_Properties[] = {
+    { "Weapon", 0x00, FIELD_TYPE_ENTITY_HANDLE, 0, true },
+};
+
+static const ComponentLayoutDef g_Cc_eoc__hit__WeaponComponent_Layout = {
+    .componentName = "eoc::hit::WeaponComponent",
+    .shortName = "Weapon",
+    .componentTypeIndex = 0,
+    .componentSize = 0x8,
+    .properties = g_Cc_eoc__hit__WeaponComponent_Properties,
+    .propertyCount = sizeof(g_Cc_eoc__hit__WeaponComponent_Properties) / sizeof(g_Cc_eoc__hit__WeaponComponent_Properties[0]),
 };
 
 // ======================================================================
@@ -6609,7 +6647,7 @@ static const ComponentLayoutDef g_Cc_eoc__trigger__TypeComponent_Layout = {
     .propertyCount = sizeof(g_Cc_eoc__trigger__TypeComponent_Properties) / sizeof(g_Cc_eoc__trigger__TypeComponent_Properties[0]),
 };
 
-#define COMPILED_COMPONENT_COUNT 318
+#define COMPILED_COMPONENT_COUNT 320
 
 static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_eoc__light__ActiveCharacterLightComponent_Layout,
@@ -6868,9 +6906,11 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_esv__trigger__RegistrationSettingsComponent_Layout,
     &g_Cc_esv__unsheath__DefaultComponent_Layout,
     &g_Cc_eoc__floor__InfoComponent_Layout,
+    &g_Cc_eoc__hit__AttackerComponent_Layout,
     &g_Cc_eoc__hit__LifetimeComponent_Layout,
     &g_Cc_eoc__hit__MetaComponent_Layout,
     &g_Cc_eoc__hit__ProxyComponent_Layout,
+    &g_Cc_eoc__hit__WeaponComponent_Layout,
     &g_Cc_ls__InstancingGroupVisualComponent_Layout,
     &g_Cc_eoc__interrupt__ConditionallyDisabledComponent_Layout,
     &g_Cc_eoc__interrupt__DataComponent_Layout,

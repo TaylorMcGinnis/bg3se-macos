@@ -1341,7 +1341,10 @@ static const ComponentLayoutDef g_CombatStateComponent_Layout = {
     .componentName = "eoc::combat::StateComponent",
     .shortName = "CombatState",
     .componentTypeIndex = 0,
-    .componentSize = 0xD8,  // Full size but only exposing safe fields
+    // 0x98 per the engine's own component size, harvested in combat. The 0xD8
+    // here came from the Windows headers and is one HashMap too many; MyGuid
+    // itself reads correctly (verified live: e5a2bd69-...).
+    .componentSize = 0x98,
     .properties = g_CombatStateComponent_Properties,
     .propertyCount = sizeof(g_CombatStateComponent_Properties) / sizeof(g_CombatStateComponent_Properties[0]),
 };
