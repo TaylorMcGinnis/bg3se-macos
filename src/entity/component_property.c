@@ -15,7 +15,8 @@
 #pragma clang diagnostic ignored "-Wzero-length-array"
 #endif
 #include "component_offsets.h"
-#include "generated_property_defs.h"  // 504 generated component layouts
+#include "compiled_property_defs.h"   // offsets computed by clang from upstream
+#include "generated_property_defs.h"  // offsets packed by hand from field lists
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
@@ -95,6 +96,24 @@ bool component_property_init(void) {
         }
     }
     LOG_ENTITY_DEBUG("Registered %d verified component layouts", verified_count);
+
+    // Compiler-computed layouts (tools/compile_layouts.py). These rank above the
+    // hand-packed ones because clang placed the fields rather than a packer
+    // guessing: it knows base classes, bitfields, std::array/optional/variant
+    // and real enum widths, and every layout here reproduces the component size
+    // this binary reports. Where the two pipelines disagreed, upstream's own
+    // [[bg3::legacy(field_XX)]] annotations sided with the compiler both times.
+    int compiled_count = 0;
+    for (int i = 0; i < COMPILED_COMPONENT_COUNT; i++) {
+        const ComponentLayoutDef* layout = g_CompiledComponentLayouts[i];
+        if (!layout) continue;
+        if (component_property_get_layout(layout->componentName)) continue;
+        if (component_property_register_layout_internal(layout, true)) {
+            compiled_count++;
+        }
+    }
+    LOG_ENTITY_DEBUG("Registered %d compiler-computed component layouts",
+                     compiled_count);
 
     // Register generated layouts from Windows BG3SE headers (unverified offsets)
     int generated_count = 0;

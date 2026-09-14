@@ -375,3 +375,83 @@ Of these, the 11 dropped for a *proven* mismatch were actively returning wrong
 values, `eoc::party::MemberComponent` and `eoc::relation::FactionComponent` among
 them. The rest are merely uncorroborated, and are the worklist for hand
 verification -- the same treatment `component_offsets.h` entries already get.
+
+## Letting the compiler compute the offsets (2026-09-14)
+
+Fixing the hand-packer raised the obvious question: why pack by hand at all?
+Upstream's headers are the declarations. They do not *contain* offsets only
+because in C++ an offset is implicit -- the compiler derives it. So derive it.
+
+`tools/compile_layouts.py` extracts upstream's struct and enum declarations,
+compiles them for arm64 against a shim carrying this build's verified container
+widths, and reads the offsets out of clang's `-fdump-record-layouts`.
+
+Upstream's tree will not compile here as-is: `Base.h` pulls in MSVC
+`__try`/`__except`, Windows types and Noesis (`NsGui/`, `NsCore/`) headers we do
+not have. Hence extraction rather than `#include`. A type we fail to supply is a
+*compile error*, which is the whole point -- the old pipeline's failure mode was
+a silently wrong offset, this one's is a diagnostic.
+
+The shim needs no facts the hand-packer did not already need (`STDString` 16,
+`Array` 16, `HashMap` 0x40). What it buys is everything the packer could not
+model: base classes and vtables, bitfields, `std::array`/`optional`/`variant`,
+padding, and **real enum widths** -- upstream declares every one of them
+(`BEGIN_ENUM(DamageType, uint8_t)`), and guessing them at 4 bytes was what forced
+251 components to truncate to nothing.
+
+Skipping a field also stopped being dangerous. A field Lua cannot surface is
+simply not emitted; clang has already placed everything after it.
+
+### A third oracle
+
+Upstream annotates renamed fields with the name they used to carry:
+
+    [[bg3::legacy(field_4)]] FixedString OwnerProfileID;
+
+That encodes an offset exactly as a bare `field_XX` does, but covers fields with
+*real* names -- the ones mods actually read. 425 of them exist, and they are the
+only offset check that touches named fields at all.
+
+### Which oracle wins, and why it flipped
+
+For the hand-packer, Windows self-naming was the stronger check. For compiled
+output it is the weaker one, and deliberately so: the packer used Windows-derived
+widths, so Windows offsets were the right yardstick, whereas the compiler uses
+*our ARM64* widths, so the size this binary reports is. Measured over components
+carrying both signals:
+
+| | count |
+| --- | --- |
+| ARM64 size matches and every self-named offset matches | 89 |
+| ARM64 size matches but a Windows self-name disagrees | 20 |
+| ARM64 size differs but self-names all match | 1 |
+| both disagree | 3 |
+
+The 20 are MSVC/libc++ container widths genuinely differing, so the Windows
+offset is the stale figure. A layout therefore ships on the ARM64 size, and falls
+back to self-naming only when the binary reports no size for it.
+
+### Result
+
+335 compiled layouts, against the hand-packer's 213. Size agreement went from
+287/333 (86%) to 458/471 (97%); 449 of 558 individual offset checks land exactly,
+with the residue concentrated in the expected Windows/ARM64 divergence.
+
+The strongest evidence is the cross-check: across the 29 components that also
+have a hand-verified layout, **67 fields agree and none disagree** -- clang
+independently reproduces every offset established by hand. Against the
+hand-packer it agrees on 366 fields and differs on 2, and upstream's own
+`[[bg3::legacy]]` annotations side with the compiler in both:
+
+| | hand-packed | compiled | upstream says |
+| --- | --- | --- | --- |
+| `eoc::user::AvatarComponent.UserID` | 0x4 | 0x0 | 0x0 (`UserID` is the first member) |
+| `eoc::PassiveComponent.PassiveId` | 0x18 | 0x4 | 0x4 (`legacy(field_0)` on `Type`) |
+
+Lookup order is now hand-verified, then compiled, then hand-packed. 663 distinct
+components carry a layout, up from 598, with zero fields past the end of their
+component across all 2560 properties.
+
+Not yet done: 1005 structs still fail to compile (mostly types the shim lacks),
+140 layouts are uncorroborated because the binary reports no size for them, and
+13 fail the size check outright.
