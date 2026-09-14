@@ -549,7 +549,7 @@ def build_tu(structs, enums, wanted):
             if not s or s.startswith('//') or '*' in s or '&' in s:
                 continue
             deps |= referenced_names(s)
-        for nm in deps:
+        for nm in sorted(deps):
             base = nm.split('::')[-1]
             if base in BUILTIN or base in SHIM_TYPES:
                 continue
@@ -560,7 +560,12 @@ def build_tu(structs, enums, wanted):
         seen.add(key)
         order.append(key)
 
-    for key in need:
+    # Sorted, not set-iteration order: emission order decides which structs are
+    # in scope when a later one names a type, so an unsorted walk made the tool
+    # emit a different number of layouts run to run (320 vs 322 on identical
+    # input). A generator whose output depends on PYTHONHASHSEED cannot be
+    # reviewed or reproduced.
+    for key in sorted(need):
         visit(key)
 
     # Render
@@ -672,7 +677,24 @@ def parse_dump(text):
     return out
 
 
+LIVE_SIZES = Path('ghidra/offsets/components/live_component_sizes.json')
+
+
 def load_arm64_sizes():
+    """Component sizes to gate layouts on, engine-reported where available.
+
+    Two sources, live winning:
+
+    1. ghidra/offsets/components/COMPONENT_SIZES*.md -- extracted statically,
+       and incomplete. 143 otherwise-sound compiled layouts are dropped purely
+       because this table has no entry to check them against, and at least one
+       entry is wrong on its face (ls::EffectComponent recorded as 0x8, smaller
+       than its own first two fields).
+    2. live_component_sizes.json -- EntityStorageData::ComponentSizes harvested
+       from a running game via Ext.Entity.GetComponentSizes(). This is the stride
+       the ECS actually uses, so it outranks any extraction of it. Produced by
+       tools/harvest_component_sizes.py; absent until someone runs it.
+    """
     sizes = {}
     for md in Path('ghidra/offsets/components').glob('COMPONENT_SIZES*.md'):
         for line in md.read_text(encoding='utf-8', errors='replace').splitlines():
@@ -689,6 +711,18 @@ def load_arm64_sizes():
                 continue
             if 0 < v <= 10000:
                 sizes[nm.lower()] = v
+
+    if LIVE_SIZES.exists():
+        import json
+        live = json.loads(LIVE_SIZES.read_text(encoding='utf-8'))
+        before = len(sizes)
+        overrode = sum(1 for k, v in live.items()
+                       if sizes.get(k.lower()) not in (None, v))
+        for k, v in live.items():
+            sizes[k.lower()] = v
+        print(f"live component sizes: {len(live)} entries "
+              f"({len(sizes) - before} new, {overrode} overriding the static "
+              f"table)", file=sys.stderr)
     return sizes
 
 

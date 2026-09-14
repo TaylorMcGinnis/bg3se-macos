@@ -192,6 +192,15 @@ int component_lookup_get_all_with_component(uint16_t componentTypeIndex,
  */
 int component_lookup_count_with_component(uint16_t componentTypeIndex);
 
+/**
+ * The engine's authoritative size for a component type, read from
+ * EntityStorageData::ComponentSizes on the running game.
+ *
+ * @param componentTypeIndex Component type index (from ComponentRegistry)
+ * @return size in bytes, or 0 if no loaded storage class carries the type
+ */
+uint16_t component_lookup_engine_size(uint16_t componentTypeIndex);
+
 #ifdef __cplusplus
 }
 #endif

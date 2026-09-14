@@ -206,30 +206,6 @@ static const ComponentLayoutDef g_Cc_eoc__BoostInfoComponent_Layout = {
 };
 
 // ======================================================================
-// ls::CameraComponent
-// Size 0xb0 (176 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0xb0
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_ls__CameraComponent_Properties[] = {
-    { "MasterBehaviorType", 0x00, FIELD_TYPE_UINT32, 0, true },
-    { "ExposureSettingIndex", 0x10, FIELD_TYPE_INT32, 0, true },
-    { "Active", 0x14, FIELD_TYPE_BOOL, 0, true },
-    { "AcceptsInput", 0x15, FIELD_TYPE_BOOL, 0, true },
-    { "UseCameraPPSettings", 0x16, FIELD_TYPE_BOOL, 0, true },
-    { "UseSplitScreenFov", 0x17, FIELD_TYPE_BOOL, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_ls__CameraComponent_Layout = {
-    .componentName = "ls::CameraComponent",
-    .shortName = "Camera",
-    .componentTypeIndex = 0,
-    .componentSize = 0xb0,
-    .properties = g_Cc_ls__CameraComponent_Properties,
-    .propertyCount = sizeof(g_Cc_ls__CameraComponent_Properties) / sizeof(g_Cc_ls__CameraComponent_Properties[0]),
-};
-
-// ======================================================================
 // eoc::CanBeDisarmedComponent
 // Size 0x2 (2 bytes)
 // Checked: compiled sizeof reproduces ARM64 size 0x2
@@ -1776,29 +1752,6 @@ static const ComponentLayoutDef g_Cc_eoc__through__ShootThroughTypeComponent_Lay
 };
 
 // ======================================================================
-// ls::SoundComponent
-// Size 0x20 (32 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0x20
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_ls__SoundComponent_Properties[] = {
-    { "Entity", 0x00, FIELD_TYPE_ENTITY_HANDLE, 0, true },
-    { "Flags", 0x10, FIELD_TYPE_UINT32, 0, true },
-    { "Duration", 0x14, FIELD_TYPE_FLOAT, 0, true },
-    { "Effect", 0x18, FIELD_TYPE_FIXEDSTRING, 0, true },
-    { "field_1C", 0x1c, FIELD_TYPE_FLOAT, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_ls__SoundComponent_Layout = {
-    .componentName = "ls::SoundComponent",
-    .shortName = "Sound",
-    .componentTypeIndex = 0,
-    .componentSize = 0x20,
-    .properties = g_Cc_ls__SoundComponent_Properties,
-    .propertyCount = sizeof(g_Cc_ls__SoundComponent_Properties) / sizeof(g_Cc_ls__SoundComponent_Properties[0]),
-};
-
-// ======================================================================
 // ls::SoundOcclusionDataComponent
 // Size 0x18 (24 bytes)
 // Checked: no ARM64 size; every Windows self-named offset lands exactly
@@ -2849,27 +2802,6 @@ static const ComponentLayoutDef g_Cc_ecl__PaperdollComponent_Layout = {
     .componentSize = 0x10,
     .properties = g_Cc_ecl__PaperdollComponent_Properties,
     .propertyCount = sizeof(g_Cc_ecl__PaperdollComponent_Properties) / sizeof(g_Cc_ecl__PaperdollComponent_Properties[0]),
-};
-
-// ======================================================================
-// ecl::Scenery
-// Size 0x40 (64 bytes)
-// Checked: compiled sizeof reproduces ARM64 size 0x40
-// ======================================================================
-
-static const ComponentPropertyDef g_Cc_ecl__Scenery_Properties[] = {
-    { "Entity2", 0x00, FIELD_TYPE_ENTITY_HANDLE, 0, true },
-    { "Uuid", 0x20, FIELD_TYPE_GUID, 0, true },
-    { "Visual", 0x38, FIELD_TYPE_FIXEDSTRING, 0, true },
-};
-
-static const ComponentLayoutDef g_Cc_ecl__Scenery_Layout = {
-    .componentName = "ecl::Scenery",
-    .shortName = "Scenery",
-    .componentTypeIndex = 0,
-    .componentSize = 0x40,
-    .properties = g_Cc_ecl__Scenery_Properties,
-    .propertyCount = sizeof(g_Cc_ecl__Scenery_Properties) / sizeof(g_Cc_ecl__Scenery_Properties[0]),
 };
 
 // ======================================================================
@@ -6697,7 +6629,7 @@ static const ComponentLayoutDef g_Cc_eoc__trigger__TypeComponent_Layout = {
     .propertyCount = sizeof(g_Cc_eoc__trigger__TypeComponent_Properties) / sizeof(g_Cc_eoc__trigger__TypeComponent_Properties[0]),
 };
 
-#define COMPILED_COMPONENT_COUNT 322
+#define COMPILED_COMPONENT_COUNT 319
 
 static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_eoc__light__ActiveCharacterLightComponent_Layout,
@@ -6709,7 +6641,6 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_eoc__BodyTypeComponent_Layout,
     &g_Cc_eoc__BoostConditionComponent_Layout,
     &g_Cc_eoc__BoostInfoComponent_Layout,
-    &g_Cc_ls__CameraComponent_Layout,
     &g_Cc_eoc__CanBeDisarmedComponent_Layout,
     &g_Cc_eoc__CanBeLootedComponent_Layout,
     &g_Cc_eoc__CanDeflectProjectilesComponent_Layout,
@@ -6786,7 +6717,6 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_eoc__ResistancesComponent_Layout,
     &g_Cc_eoc__ruleset__RulesetComponent_Layout,
     &g_Cc_eoc__through__ShootThroughTypeComponent_Layout,
-    &g_Cc_ls__SoundComponent_Layout,
     &g_Cc_ls__SoundOcclusionDataComponent_Layout,
     &g_Cc_ls__SoundRoomCurrentStateComponent_Layout,
     &g_Cc_eoc__StatsComponent_Layout,
@@ -6834,7 +6764,6 @@ static const ComponentLayoutDef* g_CompiledComponentLayouts[] = {
     &g_Cc_ecl__EquipmentVisualsComponent_Layout,
     &g_Cc_ecl__GameCameraBehavior_Layout,
     &g_Cc_ecl__PaperdollComponent_Layout,
-    &g_Cc_ecl__Scenery_Layout,
     &g_Cc_ecl__TLPreviewDummy_Layout,
     &g_Cc_ecl__camera__PhotoModeCameraInputComponent_Layout,
     &g_Cc_ecl__character_creation__DefinitionStateComponent_Layout,

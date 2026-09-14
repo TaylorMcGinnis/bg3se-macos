@@ -341,6 +341,41 @@ void *storage_data_get_component(void *storageData, EntityStorageIndex storageIn
     return result;
 }
 
+/* The engine's own size for a component type, found by scanning storage classes
+ * for one that carries it.
+ *
+ * EntityStorageData::ComponentSizes is what the ECS actually strides by, so it
+ * is the authoritative width for a component on THIS build -- more so than any
+ * static table, because it comes from the running game. The layout generators
+ * are gated on a size table extracted from Ghidra, which covers only part of the
+ * registry; 143 otherwise-sound compiled layouts are dropped for want of a size
+ * to check them against. Harvesting this live closes that gap and re-checks the
+ * rest against the engine rather than against an extraction of it.
+ *
+ * Returns 0 if no loaded storage class carries the type (nothing in the current
+ * session has the component), which is not an error. */
+uint16_t component_lookup_engine_size(uint16_t componentTypeIndex) {
+    if (!component_lookup_ready()) return 0;
+    if (is_oneframe_component(componentTypeIndex)) return 0;
+
+    GenericArray *entities = storage_container_get_entities(g_StorageContainer);
+    if (!entities || !entities->buf || entities->size == 0) return 0;
+
+    void **entityClasses = (void **)entities->buf;
+    for (uint32_t i = 0; i < entities->size; i++) {
+        void *storageData = entityClasses[i];
+        if (!storageData) continue;
+
+        uint8_t slot;
+        if (!storage_data_get_component_slot(storageData, componentTypeIndex, &slot)) {
+            continue;
+        }
+        uint16_t size = storage_data_engine_component_size(storageData, slot);
+        if (size != 0) return size;
+    }
+    return 0;
+}
+
 uint16_t storage_data_engine_component_size(void *storageData, uint8_t componentSlot) {
     if (!storageData) return 0;
 

@@ -498,3 +498,48 @@ end across 2482 properties.
 
 Remaining: 539 compile errors, mostly in non-component structs; 143 layouts the
 binary reports no size for; 33 that fail the size check.
+
+## The size oracle should come from the running game (2026-09-14)
+
+Every layout the generators emit is gated on a component size, because a layout
+whose computed size disagrees with the real one is wrong somewhere. That gate is
+only as good as the table behind it, and the static one extracted from Ghidra is
+weak in both directions:
+
+- **Incomplete.** 143 compiled layouts are dropped not because anything is wrong
+  with them but because the table has no entry to check them against.
+- **Wrong in places.** It records `ls::EffectComponent` as 0x8 -- smaller than
+  that struct's own first two fields.
+
+The engine holds the real table. `EntityStorageData::ComponentSizes` is the
+stride the ECS actually addresses by, so it outranks any static extraction of it,
+and `component_lookup.c` already reads it per slot to avoid striding by our own
+numbers.
+
+Added `component_lookup_engine_size()` (scans storage classes for one carrying a
+type, returns the engine's width) and `Ext.Entity.GetComponentSizes()`, which
+walks the registry and returns `{ ["eoc::XComponent"] = 24, ... }` for every
+type some loaded storage class carries. `tools/harvest_component_sizes.py`
+captures that into `ghidra/offsets/components/live_component_sizes.json`, and
+`compile_layouts.py` prefers it over the static table, reporting how many entries
+are new and how many override.
+
+Only components present in the current session are reported, so a larger save
+yields a better table and runs merge rather than replace. A component reporting
+a *different* size across runs of the same build would mean the model is wrong,
+so the harvester flags that rather than quietly overwriting.
+
+Not yet harvested: the running game is on a pre-build dylib, so this waits on a
+relaunch.
+
+### The generator was not reproducible
+
+Its dependency walk iterated a Python set, so emission order varied with
+`PYTHONHASHSEED`. Order decides which structs are in scope when a later one names
+a type, so identical input produced 320 layouts one run and 322 the next. Now
+sorted, and stable at 319 across seeds -- three fewer than the best unsorted run,
+which is the right trade: a generator whose output cannot be reproduced cannot be
+reviewed either.
+
+Unchanged by both: 66 fields agreeing with the hand-verified layouts, none
+disagreeing.

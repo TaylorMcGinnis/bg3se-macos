@@ -3195,6 +3195,46 @@ static int lua_entity_get_all(lua_State *L) {
     return 1;
 }
 
+// Ext.Entity.GetComponentSizes() -> { ["eoc::XComponent"] = 24, ... }
+//
+// The engine's own component widths, read from EntityStorageData::ComponentSizes
+// for every registered type some loaded storage class carries.
+//
+// This is the oracle the layout generators are gated on. They currently use a
+// size table extracted from Ghidra that covers only part of the registry, so
+// sound layouts get dropped merely because nothing could check them. Taken from
+// the running game the table is both larger and authoritative -- it is the
+// stride the ECS actually uses, not an extraction of it.
+//
+// Only components present in the CURRENT session appear; a type no loaded
+// storage class carries has no size to report, and is omitted rather than
+// reported as zero.
+static int lua_entity_get_component_sizes(lua_State *L) {
+    lua_newtable(L);
+    if (!component_lookup_ready()) {
+        return 1;
+    }
+
+    int total = component_registry_count();
+    int found = 0;
+    for (int i = 0; i < total; i++) {
+        const ComponentInfo *info = component_registry_get_at(i);
+        if (!info || !info->name[0]) continue;
+        if (info->index == 0xFFFF) continue;
+
+        uint16_t size = component_lookup_engine_size(info->index);
+        if (size == 0) continue;
+
+        lua_pushinteger(L, (lua_Integer)size);
+        lua_setfield(L, -2, info->name);
+        found++;
+    }
+
+    LOG_ENTITY_DEBUG("GetComponentSizes: %d of %d registered components have a "
+                     "live size", found, total);
+    return 1;
+}
+
 // Ext.Entity.GetAllEntitiesWithComponent(componentName) -> { entity1, entity2, ... }
 // Returns an array of all entities that have the specified component.
 static int lua_entity_get_all_with_component(lua_State *L) {
@@ -3898,6 +3938,8 @@ void entity_register_lua(lua_State *L) {
 
     lua_pushcfunction(L, lua_entity_dump_storage);
     lua_setfield(L, -2, "DumpStorage");
+    lua_pushcfunction(L, lua_entity_get_component_sizes);
+    lua_setfield(L, -2, "GetComponentSizes");
 
     // TypeId Discovery API
     lua_pushcfunction(L, lua_entity_discover_type_ids);
