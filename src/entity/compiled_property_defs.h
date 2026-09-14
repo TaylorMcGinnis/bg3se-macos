@@ -1093,7 +1093,7 @@ static const ComponentLayoutDef g_Cc_eoc__GameObjectVisualComponent_Layout = {
 // ======================================================================
 // eoc::GameplayLightComponent
 // Size 0x48 (72 bytes)
-// Checked: no ARM64 size; every Windows self-named offset lands exactly
+// Checked: compiled sizeof reproduces ARM64 size 0x48
 // ======================================================================
 
 static const ComponentPropertyDef g_Cc_eoc__GameplayLightComponent_Properties[] = {
@@ -5725,7 +5725,7 @@ static const ComponentLayoutDef g_Cc_eoc__inventory__WeightComponent_Layout = {
 // ======================================================================
 // eoc::inventory::WieldedComponent
 // Size 0x10 (16 bytes)
-// Checked: no ARM64 size; every Windows self-named offset lands exactly
+// Checked: compiled sizeof reproduces ARM64 size 0x10
 // ======================================================================
 
 static const ComponentPropertyDef g_Cc_eoc__inventory__WieldedComponent_Properties[] = {

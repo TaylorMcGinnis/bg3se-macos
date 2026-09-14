@@ -543,3 +543,57 @@ reviewed either.
 
 Unchanged by both: 66 fields agreeing with the hand-verified layouts, none
 disagreeing.
+
+## First live harvest (2026-09-14)
+
+`Ext.Entity.GetComponentSizes()` returned 227 components -- only those some
+loaded storage class in the current save carries, so coverage is save-dependent
+and repeated harvests from different saves accumulate.
+
+**The static table held up.** Of the 212 that overlap, **210 agree**. The
+Ghidra extraction is sound; it is just incomplete.
+
+The two disagreements both mattered:
+
+| Component | engine | static | verdict |
+| --- | --- | --- | --- |
+| `eoc::IgnorePointBlankDisadvantageBoostComponent` | 4 | 1 | our hand fix to 0x4 was right; the *static table* was stale |
+| `eoc::IgnoreResistanceBoostComponent` | 2 | 24 | our layout was wrong -- 0x18 was fiction |
+
+`IgnoreResistance`'s "unexplained 0x18", open since the first pass of this audit,
+is resolved: the component is **2 bytes**. Upstream declares no struct for it at
+all, only the enum name, so the 0x18 came from a stale Windows source. Typed
+`DamageType` as INT32 at 0x00, it read 4 bytes out of a 2-byte component and
+returned values like 604443143; `Flags` at 0x04 was entirely the next entity's
+component. Decoding the over-reads showed the real bytes repeating in pairs --
+`DamageType` 7/3/1, `Flags` 0x12/0x24 -- consistent with a 1-byte `DamageType`,
+which is how it is sized in every other boost layout on this build.
+
+### Sweeping every layout against the live sizes
+
+Two read past the end of their component, both in the **hand-verified** file:
+
+- `eoc::IgnoreResistanceBoostComponent`, above.
+- `eoc::DisplayNameComponent` -- declared 0x40 "ARM64 verified via Ghidra", but
+  the engine says **0x20**: one `TranslatedString`, not two. `Title`,
+  `UnknownKey` and `TitleHandle` all sat at 0x20 and were reading the next
+  entity's component, which is why a live read returned
+  `TitleHandle=471061120`. This build has no Title here. Removed; nothing in
+  the tree or in the AEE override referenced them.
+
+That both were in the hand-verified file is the point worth keeping: these
+layouts are the ones this port trusts most, and they had been checked against a
+static extraction rather than the engine.
+
+Two more declared a size larger than the engine's without any field yet
+overrunning: `eoc::exp::ExperienceComponent` (0x18 -> 0x10) and
+`eoc::inventory::ContainerComponent` (0x48 -> 0x40). The latter is exactly one
+HashMap, which independently confirms the 0x40 HashMap width that had only been
+fitted statistically against the size oracle.
+
+After the fixes: **zero fields read past the engine's size**, and every layout
+with a live size declares that size.
+
+Generator effect was modest -- 15 sizes new, 2 overriding, 9 more layouts
+confirmed (unconfirmable 143 -> 134) -- because 212 of the 227 were already
+known. The value was in the four corrections above, not the coverage.

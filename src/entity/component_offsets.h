@@ -211,7 +211,9 @@ static const ComponentLayoutDef g_ExperienceComponent_Layout = {
     .componentName = "eoc::exp::ExperienceComponent",
     .shortName = "Experience",
     .componentTypeIndex = 0,
-    .componentSize = 0x18,    // ARM64 verified via Ghidra
+    // 0x10 per the engine's own component size; the 0x18 here was recorded as
+    // "ARM64 verified via Ghidra" and is 8 bytes too generous.
+    .componentSize = 0x10,
     .properties = g_ExperienceComponent_Properties,
     .propertyCount = sizeof(g_ExperienceComponent_Properties) / sizeof(g_ExperienceComponent_Properties[0]),
 };
@@ -823,7 +825,9 @@ static const ComponentLayoutDef g_InventoryContainerComponent_Layout = {
     .componentName = "eoc::inventory::ContainerComponent",
     .shortName = "InventoryContainer",
     .componentTypeIndex = 0,
-    .componentSize = 0x48,
+    // 0x40 per the engine: exactly one HashMap, which independently confirms
+    // the 0x40 HashMap width that had only been fitted statistically.
+    .componentSize = 0x40,
     .properties = g_InventoryContainerComponent_Properties,
     .propertyCount = sizeof(g_InventoryContainerComponent_Properties) / sizeof(g_InventoryContainerComponent_Properties[0]),
 };
@@ -1196,25 +1200,30 @@ static const ComponentLayoutDef g_TranslatedString_Layout = {
  * Both the modern and legacy names are offered at the same offsets, since mods
  * in the wild use either. The flat NameHandle/TitleHandle accessors this port
  * already had are kept so existing callers keep working. */
+/* Title/UnknownKey/TitleHandle REMOVED 2026-09-14: they sat at 0x20, and the
+ * engine reports this component as 0x20 bytes total.
+ *
+ * The size here said 0x40 and claimed Ghidra verification, but
+ * EntityStorageData::ComponentSizes -- the stride the ECS actually addresses by
+ * -- says 0x20, i.e. one TranslatedString, not two. Everything at 0x20 was
+ * reading the NEXT entity's component out of the same buffer, which is why a
+ * live read returned TitleHandle=471061120. This build has no Title here. */
 static const ComponentPropertyDef g_DisplayNameComponent_Properties[] = {
     { "Name",         0x00, FIELD_TYPE_STRUCT, 0, false, ELEM_TYPE_UNKNOWN, 0,
       .structLayout = &g_TranslatedString_Layout },
     { "NameKey",      0x00, FIELD_TYPE_STRUCT, 0, false, ELEM_TYPE_UNKNOWN, 0,
       .structLayout = &g_TranslatedString_Layout },   // upstream legacy name
-    { "Title",        0x20, FIELD_TYPE_STRUCT, 0, false, ELEM_TYPE_UNKNOWN, 0,
-      .structLayout = &g_TranslatedString_Layout },
-    { "UnknownKey",   0x20, FIELD_TYPE_STRUCT, 0, false, ELEM_TYPE_UNKNOWN, 0,
-      .structLayout = &g_TranslatedString_Layout },   // upstream legacy name
-    // Flat accessors kept for compatibility with existing callers.
+    // Flat accessor kept for compatibility with existing callers.
     { "NameHandle",   0x00, FIELD_TYPE_FIXEDSTRING, 0, false },
-    { "TitleHandle",  0x20, FIELD_TYPE_FIXEDSTRING, 0, false },
 };
 
 static const ComponentLayoutDef g_DisplayNameComponent_Layout = {
     .componentName = "eoc::DisplayNameComponent",
     .shortName = "DisplayName",
     .componentTypeIndex = 0,
-    .componentSize = 0x40,    // ARM64 verified via Ghidra
+    // 0x20, not the 0x40 previously recorded here as "ARM64 verified via
+    // Ghidra": the engine's own EntityStorageData::ComponentSizes reports 0x20.
+    .componentSize = 0x20,
     .properties = g_DisplayNameComponent_Properties,
     .propertyCount = sizeof(g_DisplayNameComponent_Properties) / sizeof(g_DisplayNameComponent_Properties[0]),
 };
@@ -3573,17 +3582,26 @@ static const ComponentLayoutDef g_eoc_IgnorePointBlankDisadvantageBoostComponent
     .propertyCount = sizeof(g_eoc_IgnorePointBlankDisadvantageBoostComponent_Properties) / sizeof(g_eoc_IgnorePointBlankDisadvantageBoostComponent_Properties[0]),
 };
 
-// eoc::IgnoreResistanceBoostComponent - 24 bytes (0x18)
-// Source: IgnoreResistanceBoostComponent from Windows BG3SE
+// eoc::IgnoreResistanceBoostComponent - 2 bytes, per the live engine size
+/* 2 bytes, per the engine's own component size -- not the 0x18 previously
+ * recorded from a stale Windows source (upstream declares no struct for this
+ * component at all, only the enum name).
+ *
+ * DamageType was typed INT32 at 0x00, so it read 4 bytes out of a 2-byte
+ * component and returned values like 604443143; Flags at 0x04 was entirely the
+ * next entity's component. Decoding those over-reads showed the real bytes
+ * repeating in pairs -- DamageType 7/3/1, Flags 0x12/0x24 -- consistent with
+ * 1-byte DamageType, which is how it is sized in every other boost layout on
+ * this build. */
 static const ComponentPropertyDef g_eoc_IgnoreResistanceBoostComponent_Properties[] = {
-    { "DamageType", 0x00, FIELD_TYPE_INT32, 0, false },
-    { "Flags", 0x04, FIELD_TYPE_UINT8, 0, false },
+    { "DamageType", 0x00, FIELD_TYPE_UINT8, 0, false },
+    { "Flags", 0x01, FIELD_TYPE_UINT8, 0, false },
 };
 static const ComponentLayoutDef g_eoc_IgnoreResistanceBoostComponent_Layout = {
     .componentName = "eoc::IgnoreResistanceBoostComponent",
     .shortName = "IgnoreResistanceBoostComponent",
     .componentTypeIndex = 0,
-    .componentSize = 0x18,
+    .componentSize = 0x02,
     .properties = g_eoc_IgnoreResistanceBoostComponent_Properties,
     .propertyCount = sizeof(g_eoc_IgnoreResistanceBoostComponent_Properties) / sizeof(g_eoc_IgnoreResistanceBoostComponent_Properties[0]),
 };
