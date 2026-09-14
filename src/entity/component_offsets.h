@@ -3503,10 +3503,17 @@ static const ComponentLayoutDef g_eoc_HorizontalFOVOverrideBoostComponent_Layout
 
 // eoc::IgnoreDamageThresholdMinBoostComponent - 4 bytes (0x4)
 // Source: IgnoreDamageThresholdMinBoostComponent from Windows BG3SE
+/* CORRECTED against upstream (Components/Boosts.h:208):
+ *   DamageType DamageType;  bool All;  uint16_t Amount;
+ *
+ * DamageType is a ONE-byte enum, not the int32 assumed here, and Amount is
+ * uint16. With those widths the struct is 1+1+2 = 4, exactly the recorded
+ * component size; the previous layout put a uint32 at offset 5, which is both
+ * unaligned and past the end of a 4-byte component. */
 static const ComponentPropertyDef g_eoc_IgnoreDamageThresholdMinBoostComponent_Properties[] = {
-    { "DamageType", 0x00, FIELD_TYPE_INT32, 0, false },
-    { "All", 0x04, FIELD_TYPE_BOOL, 0, false },
-    { "Amount", 0x05, FIELD_TYPE_UINT32, 0, false },
+    { "DamageType", 0x00, FIELD_TYPE_UINT8,  0, false, ELEM_TYPE_UNKNOWN, 0, &g_enum_DamageType },
+    { "All",        0x01, FIELD_TYPE_BOOL,   0, false },
+    { "Amount",     0x02, FIELD_TYPE_UINT16, 0, false },
 };
 static const ComponentLayoutDef g_eoc_IgnoreDamageThresholdMinBoostComponent_Layout = {
     .componentName = "eoc::IgnoreDamageThresholdMinBoostComponent",
@@ -3794,10 +3801,20 @@ static const ComponentLayoutDef g_eoc_PhysicalForceRangeBonusBoostComponent_Layo
 
 // eoc::RedirectDamageBoostComponent - 8 bytes (0x8)
 // Source: RedirectDamageBoostComponent from Windows BG3SE
+/* CORRECTED against upstream (Components/Boosts.h:438):
+ *   int32_t Amount;  DamageType DamageType1;  DamageType DamageType2;
+ *   bool RedirectToDamageSource;   // upstream legacy name: field_6
+ *
+ * DamageType is one byte, so the members sit at 0, 4, 5, 6 and the struct is 8
+ * with padding -- exactly the recorded component size, and upstream's legacy
+ * field_6 confirms the bool's offset independently. The previous layout spaced
+ * the damage types 4 bytes apart, putting DamageType2 past the end. */
 static const ComponentPropertyDef g_eoc_RedirectDamageBoostComponent_Properties[] = {
-    { "Amount", 0x00, FIELD_TYPE_INT32, 0, false },
-    { "DamageType1", 0x04, FIELD_TYPE_INT32, 0, false },
-    { "DamageType2", 0x08, FIELD_TYPE_INT32, 0, false },
+    { "Amount",                 0x00, FIELD_TYPE_INT32, 0, false },
+    { "DamageType1",            0x04, FIELD_TYPE_UINT8, 0, false, ELEM_TYPE_UNKNOWN, 0, &g_enum_DamageType },
+    { "DamageType2",            0x05, FIELD_TYPE_UINT8, 0, false, ELEM_TYPE_UNKNOWN, 0, &g_enum_DamageType },
+    { "RedirectToDamageSource", 0x06, FIELD_TYPE_BOOL,  0, false },
+    { "field_6",                0x06, FIELD_TYPE_BOOL,  0, false },
 };
 static const ComponentLayoutDef g_eoc_RedirectDamageBoostComponent_Layout = {
     .componentName = "eoc::RedirectDamageBoostComponent",

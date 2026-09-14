@@ -143,6 +143,26 @@ established. Verified live: five consecutive elements read
 the order `SpellBookPrepares.PreparedSpells` reports for the same character from
 a different component.
 
+**Corrected: two boost layouts read past the end of their component.** Found by
+sweeping every layout for fields whose offset+width exceeds the recorded
+`componentSize` — a mechanical check worth re-running after any layout change:
+
+- `eoc::IgnoreDamageThresholdMinBoostComponent` had `Amount` as a `uint32` at
+  offset **5** — unaligned, and past the end of a 4-byte component. Upstream is
+  `DamageType(1) + bool All(1) + uint16 Amount(2)` = 4, matching the size exactly.
+- `eoc::RedirectDamageBoostComponent` spaced its two damage types 4 bytes apart,
+  putting `DamageType2` past the end of an 8-byte component. Upstream is
+  `int32 Amount + DamageType1(1) + DamageType2(1) + bool(1)` = 8, and upstream's
+  legacy name `field_6` confirms the bool's offset independently.
+
+**`DamageType` is a ONE-byte enum.** Both corrections turn on this, proved by the
+size arithmetic above. **12 fields across these layouts still type it as
+int32/uint32** (`component_offsets.h`, search `"DamageType`). Reading a 1-byte
+enum as a 32-bit value pulls in three neighbouring bytes, so those are all
+returning wrong values — but each needs its own component's size arithmetic
+before being changed, since narrowing a field can imply different offsets for
+what follows. Only the two proven above were touched.
+
 **Left alone, flagged as suspect** (guessing would make them worse):
 
 | Ours | Upstream | Problem |
@@ -174,6 +194,19 @@ components, `eoc::spell::BookCooldownsComponent.Cooldowns`,
 
 `esv::BaseDataComponent.Resistances` is a fixed `std::array<std::array<...,7>,2>`;
 `esv::CustomStatsComponent.Stats` is a `LegacyMap<FixedString,int>`.
+
+## Mechanical checks worth re-running
+
+Both found real defects and cost nothing:
+
+1. **Fields past the end of their component** — for each property, does
+   `offset + width` exceed `componentSize`? This found both boost layouts above.
+   Note that nested struct layouts with `componentSize = 0` produce noise, and
+   that a layout sharing a property array with another (as `SpellMetaId` shares
+   `SpellId`'s) will false-positive unless `propertyCount` is honoured.
+2. **Element size vs element type** — does a typed array's `elemSize` match the
+   width its `ELEM_TYPE_*` implies, and for struct elements, the referenced
+   layout's `componentSize`? Currently clean.
 
 ## How to measure a struct element's stride
 
