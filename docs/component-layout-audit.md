@@ -14,17 +14,33 @@ Prompted by two stubs that hid real data from mods for months:
   "attempt to index a nil value (field 'NameKey')" four times a frame because of
   it.
 
-## Lua-name mismatches: 99, and they are COSMETIC
+## Lua-name mismatches: mostly cosmetic, but the fallback has holes
 
-99 hand-written layouts carry a `shortName` that differs from upstream's
-`DEFINE_COMPONENT` name (e.g. ours `AttributeFlagsComponent`, upstream
-`AttributeFlags`). **These are not bugs.** Entity lookup falls back through the
-generated upstream name table, so both names resolve — verified live on
-`CharacterCreationStats`, `AttributeFlags`, `BodyType`, `Voice`,
-`ApprovalRatings`, `CharacterCreationAppearance`.
+99 hand-written layouts carry a `shortName` differing from upstream's name (ours
+`AttributeFlagsComponent`, upstream `AttributeFlags`). Entity lookup falls back
+through the generated upstream name table, so **where the table has an entry,
+both names resolve** — verified on `CharacterCreationStats`, `AttributeFlags`,
+`BodyType`, `Voice`, `ApprovalRatings`, `CharacterCreationAppearance`.
 
-Do not mass-rename them. The only reason to touch one is if a *specific* lookup
-is shown to fail.
+**An earlier version of this document called all 99 cosmetic. That was wrong**,
+generalised from six samples that happened to be covered. The fallback is only
+as good as the table, and the table had two holes:
+
+1. **All 103 boost components were missing.** Upstream declares them through a
+   `DEFN_BOOST` macro (`Base/Base.h:84`), so the literal Lua name never appears
+   in the headers and the generator — which scanned for `DEFINE_COMPONENT` — saw
+   none of them. `e.WeaponDamageBoost` was nil while
+   `e.WeaponDamageBoostComponent` worked. Fixed in the generator, which derives
+   both strings exactly from the macro (`#name "Boost"` and
+   `"eoc::" #name "BoostComponent"`): 783 → 887 entries.
+2. **`Ext.Entity.GetAllEntitiesWithComponent` never consulted the table at all.**
+   It resolved through the class-name-keyed registry plus two hardcoded aliases,
+   so `GetAllEntitiesWithComponent("AbilityBoost")` returned an empty table while
+   the full class name found 254 entities — with no error to explain it. It now
+   falls back through the upstream table and this port's short names.
+
+Do not mass-rename layouts. Do check that a name actually resolves before
+concluding a mismatch is harmless.
 
 ## Opaque arrays: 45, and these ARE the problem
 

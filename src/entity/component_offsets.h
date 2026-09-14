@@ -3067,8 +3067,16 @@ static const ComponentLayoutDef g_eoc_CharacterCreationStatsComponent_Layout = {
 
 // eoc::CharacterUnarmedDamageBoostComponent - 40 bytes (0x28)
 // Source: CharacterUnarmedDamageBoostComponent from Windows BG3SE
+/* CORRECTED against upstream (Components/Boosts.h). These boosts lead with
+ * StatsExpressionInternal Amount, which is Array<Param> (0x10) + STDString
+ * Code (0x10) = 0x20 on this build -- so DamageType sits AFTER it, not at
+ * offset 0 as this layout had it. The derived sizes match the recorded
+ * componentSize exactly, which is what makes the offsets trustworthy.
+ * DamageType is a one-byte enum (see IgnoreDamageThresholdMin/RedirectDamage).
+ * Amount itself is left undescribed: StatsExpressionInternal holds a variant
+ * array this layer cannot model. */
 static const ComponentPropertyDef g_eoc_CharacterUnarmedDamageBoostComponent_Properties[] = {
-    { "DamageType", 0x00, FIELD_TYPE_INT32, 0, false },
+    { "DamageType", 0x20, FIELD_TYPE_UINT8, 0, false, ELEM_TYPE_UNKNOWN, 0, &g_enum_DamageType },
 };
 static const ComponentLayoutDef g_eoc_CharacterUnarmedDamageBoostComponent_Layout = {
     .componentName = "eoc::CharacterUnarmedDamageBoostComponent",
@@ -3081,8 +3089,16 @@ static const ComponentLayoutDef g_eoc_CharacterUnarmedDamageBoostComponent_Layou
 
 // eoc::CharacterWeaponDamageBoostComponent - 40 bytes (0x28)
 // Source: CharacterWeaponDamageBoostComponent from Windows BG3SE
+/* CORRECTED against upstream (Components/Boosts.h). These boosts lead with
+ * StatsExpressionInternal Amount, which is Array<Param> (0x10) + STDString
+ * Code (0x10) = 0x20 on this build -- so DamageType sits AFTER it, not at
+ * offset 0 as this layout had it. The derived sizes match the recorded
+ * componentSize exactly, which is what makes the offsets trustworthy.
+ * DamageType is a one-byte enum (see IgnoreDamageThresholdMin/RedirectDamage).
+ * Amount itself is left undescribed: StatsExpressionInternal holds a variant
+ * array this layer cannot model. */
 static const ComponentPropertyDef g_eoc_CharacterWeaponDamageBoostComponent_Properties[] = {
-    { "DamageType", 0x00, FIELD_TYPE_INT32, 0, false },
+    { "DamageType", 0x20, FIELD_TYPE_UINT8, 0, false, ELEM_TYPE_UNKNOWN, 0, &g_enum_DamageType },
 };
 static const ComponentLayoutDef g_eoc_CharacterWeaponDamageBoostComponent_Layout = {
     .componentName = "eoc::CharacterWeaponDamageBoostComponent",
@@ -3138,9 +3154,18 @@ static const ComponentLayoutDef g_eoc_CriticalHitExtraDiceBoostComponent_Layout 
 
 // eoc::DamageBonusBoostComponent - 40 bytes (0x28)
 // Source: DamageBonusBoostComponent from Windows BG3SE
+/* CORRECTED against upstream (Components/Boosts.h). These boosts lead with
+ * StatsExpressionInternal Amount, which is Array<Param> (0x10) + STDString
+ * Code (0x10) = 0x20 on this build -- so DamageType sits AFTER it, not at
+ * offset 0 as this layout had it. The derived sizes match the recorded
+ * componentSize exactly, which is what makes the offsets trustworthy.
+ * DamageType is a one-byte enum (see IgnoreDamageThresholdMin/RedirectDamage).
+ * Amount itself is left undescribed: StatsExpressionInternal holds a variant
+ * array this layer cannot model. */
 static const ComponentPropertyDef g_eoc_DamageBonusBoostComponent_Properties[] = {
-    { "DamageType", 0x00, FIELD_TYPE_INT32, 0, false },
-    { "field_31", 0x04, FIELD_TYPE_UINT8, 0, false },
+    { "DamageType",  0x20, FIELD_TYPE_UINT8, 0, false, ELEM_TYPE_UNKNOWN, 0, &g_enum_DamageType },
+    { "CriticalHit", 0x21, FIELD_TYPE_BOOL,  0, false },
+    { "field_31",    0x21, FIELD_TYPE_BOOL,  0, false },   /* upstream legacy name */
 };
 static const ComponentLayoutDef g_eoc_DamageBonusBoostComponent_Layout = {
     .componentName = "eoc::DamageBonusBoostComponent",
@@ -3169,9 +3194,18 @@ static const ComponentLayoutDef g_eoc_DamageReductionBoostComponent_Layout = {
 
 // eoc::DamageTakenBonusBoostComponent - 40 bytes (0x28)
 // Source: DamageTakenBonusBoostComponent from Windows BG3SE
+/* CORRECTED against upstream (Components/Boosts.h). These boosts lead with
+ * StatsExpressionInternal Amount, which is Array<Param> (0x10) + STDString
+ * Code (0x10) = 0x20 on this build -- so DamageType sits AFTER it, not at
+ * offset 0 as this layout had it. The derived sizes match the recorded
+ * componentSize exactly, which is what makes the offsets trustworthy.
+ * DamageType is a one-byte enum (see IgnoreDamageThresholdMin/RedirectDamage).
+ * Amount itself is left undescribed: StatsExpressionInternal holds a variant
+ * array this layer cannot model. */
 static const ComponentPropertyDef g_eoc_DamageTakenBonusBoostComponent_Properties[] = {
-    { "DamageType", 0x00, FIELD_TYPE_INT32, 0, false },
-    { "Arg3", 0x04, FIELD_TYPE_BOOL, 0, false },
+    { "DamageType",  0x20, FIELD_TYPE_UINT8, 0, false, ELEM_TYPE_UNKNOWN, 0, &g_enum_DamageType },
+    { "CriticalHit", 0x21, FIELD_TYPE_BOOL,  0, false },
+    { "Arg3",        0x21, FIELD_TYPE_BOOL,  0, false },   /* upstream legacy name */
 };
 static const ComponentLayoutDef g_eoc_DamageTakenBonusBoostComponent_Layout = {
     .componentName = "eoc::DamageTakenBonusBoostComponent",
@@ -4195,9 +4229,18 @@ static const ComponentLayoutDef g_eoc_WeaponAttackTypeOverrideBoostComponent_Lay
 
 // eoc::WeaponDamageBoostComponent - 48 bytes (0x30)
 // Source: WeaponDamageBoostComponent from Windows BG3SE
+/* CORRECTED against upstream (Components/Boosts.h). These boosts lead with
+ * StatsExpressionInternal Amount, which is Array<Param> (0x10) + STDString
+ * Code (0x10) = 0x20 on this build -- so DamageType sits AFTER it, not at
+ * offset 0 as this layout had it. The derived sizes match the recorded
+ * componentSize exactly, which is what makes the offsets trustworthy.
+ * DamageType is a one-byte enum (see IgnoreDamageThresholdMin/RedirectDamage).
+ * Amount itself is left undescribed: StatsExpressionInternal holds a variant
+ * array this layer cannot model. */
 static const ComponentPropertyDef g_eoc_WeaponDamageBoostComponent_Properties[] = {
-    { "DamageType", 0x00, FIELD_TYPE_INT32, 0, false },
-    { "field_30", 0x04, FIELD_TYPE_BOOL, 0, false },
+    { "DamageType", 0x00, FIELD_TYPE_UINT8, 0, false, ELEM_TYPE_UNKNOWN, 0, &g_enum_DamageType },
+    /* Amount is 8-aligned at 0x08, so the trailing bool lands at 0x28. */
+    { "field_30",   0x28, FIELD_TYPE_BOOL,  0, false },
 };
 static const ComponentLayoutDef g_eoc_WeaponDamageBoostComponent_Layout = {
     .componentName = "eoc::WeaponDamageBoostComponent",

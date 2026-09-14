@@ -3207,6 +3207,30 @@ static int lua_entity_get_all_with_component(lua_State *L) {
 
     // Look up component type index from name
     const ComponentInfo *info = component_registry_lookup(componentName);
+
+    /* The registry is keyed on engine class names, but mods pass the Lua-facing
+     * name -- what entity indexing takes, and what upstream accepts. Without
+     * this, Ext.Entity.GetAllEntitiesWithComponent("AbilityBoost") returned an
+     * empty table while "eoc::AbilityBoostComponent" found 254 entities, with no
+     * error to explain the difference. Same defect the RemoveComponent
+     * specialization lookup had. */
+    if (!info) {
+        const char *className = component_upstream_name_to_class(componentName);
+        if (className) {
+            info = component_registry_lookup(className);
+        }
+    }
+
+    /* Finally, this port's own short name (component_offsets.h shortName), which
+     * differs from upstream's for a number of layouts. */
+    if (!info) {
+        const ComponentLayoutDef *layout =
+            component_property_get_layout_by_short_name(componentName);
+        if (layout && layout->componentName) {
+            info = component_registry_lookup(layout->componentName);
+        }
+    }
+
     if (!info) {
         // Try common aliases
         if (strcmp(componentName, "ServerCharacter") == 0) {
