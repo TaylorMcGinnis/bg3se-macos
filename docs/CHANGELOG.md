@@ -2,6 +2,33 @@
 
 All notable changes to BG3SE-macOS are documented here.
 
+## Unreleased
+
+- **Raised the per-event handler cap from 256 to 2048.** An 828-mod load order
+  overflowed `Tick` **438 times in one session** -- MCM and DivineCurse each hit
+  it repeatedly -- and every overflow is a handler that silently never runs.
+
+  Upstream has no cap: `SubscribableEvent.lua` is a doubly-linked list with
+  `EnterCount`/`PendingAdds`/`PendingDeletions`, so subscriptions are unbounded
+  and nodes never move. This table cannot simply grow, because dispatch holds
+  `EventHandler *h = &g_handlers[event][i]` across the Lua call and reallocating
+  under that pointer is a use-after-free. Removing the ceiling needs deferred
+  *adds* first -- the other two pieces already exist, `g_dispatch_depth` being
+  upstream's `EnterCount` and `g_deferred_unsubs` its `PendingDeletions` -- and
+  once the table provably cannot mutate mid-dispatch, growing it outside
+  dispatch is safe. That is the follow-up; this is headroom until then.
+
+  Cost is `EVENT_MAX` (50) x cap x 96 bytes: 1.2 MB -> 9.4 MB, all `__bss`
+  zerofill, so nothing is added to the file on disk and pages for rare events
+  are never touched.
+
+- **A full deferred-unsubscribe queue no longer fails silently.** A `Once`
+  handler that cannot be queued for removal fires on every subsequent dispatch,
+  forever; the overflow branch dropped it with no log line, so the mod looked
+  like it was misbehaving and nothing pointed at the queue. It now warns once
+  with the event and the mod that registered the handler. The queue was raised
+  to 2048 alongside the handler table.
+
 ## v0.47.5 - 2026-09-14
 
 - **357 component fields were reading the wrong address.** The offsets in
@@ -72,8 +99,6 @@ All notable changes to BG3SE-macOS are documented here.
 - **284 components were registered but unreachable by upstream's name**, and 181
   tag components plus all 103 boost components were missing from the generated
   name table entirely.
-
-## Unreleased (earlier, same cycle)
 
 - **Appearance Edit Enhanced works end to end.** Three gaps blocked it, each hit
   in turn as the previous one was fixed:

@@ -32,12 +32,26 @@
 // ============================================================================
 
 // Per EVENT TYPE, not overall: a common event like Tick or GameStateChanged
-// collects one handler per interested mod. 45 SE mods is already most of the
-// way to 64. Not observed overflowing yet, but it is the same shape of cap as
-// MAX_MODS/MAX_MOD_UUIDS/UVAR_MAX_MODS, and the whole table only grows from
-// 0.25 MB to 1.0 MB.
-#define MAX_EVENT_HANDLERS 256
-#define MAX_DEFERRED_OPERATIONS 256
+// collects one handler per interested mod.
+//
+// 256 was NOT enough. An 828-mod load order overflowed Tick 438 times in a
+// single session -- MCM and DivineCurse each hit it repeatedly -- and every
+// overflow is a handler that silently never runs.
+//
+// Upstream has no cap at all: SubscribableEvent.lua is a doubly-linked list
+// with EnterCount/PendingAdds/PendingDeletions, so subscriptions are unbounded
+// and nodes never move. This table cannot simply grow, because dispatch holds
+// `EventHandler *h = &g_handlers[event][i]` across the Lua call and a realloc
+// under that pointer is a use-after-free. Removing the ceiling therefore needs
+// deferred ADDS first (we already have the other two pieces: g_dispatch_depth
+// is upstream's EnterCount, g_deferred_unsubs its PendingDeletions) -- once the
+// table provably cannot mutate mid-dispatch, growing it outside dispatch is
+// safe. That is a separate change; this is headroom until then.
+//
+// Cost is EVENT_MAX (~50) * cap * sizeof(EventHandler) (96): 1.2 MB at 256,
+// 9.4 MB at 2048.
+#define MAX_EVENT_HANDLERS 2048
+#define MAX_DEFERRED_OPERATIONS 2048
 #define DEFAULT_PRIORITY 100
 
 // ============================================================================
@@ -446,6 +460,21 @@ void events_fire(lua_State *L, BG3SEEventType event) {
             if (g_deferred_unsub_count < MAX_DEFERRED_OPERATIONS) {
                 g_deferred_unsubs[g_deferred_unsub_count++] =
                     (DeferredUnsubscribe){event, h->handler_id};
+            } else {
+                // Dropping this is not cosmetic: a Once handler that never gets
+                // unsubscribed fires on EVERY subsequent dispatch, forever. It
+                // used to drop silently, which is the worst way to fail -- the
+                // mod looks like it is misbehaving and nothing points here.
+                static bool s_warned;
+                if (!s_warned) {
+                    s_warned = true;
+                    LOG_LUA_WARN("Deferred-unsubscribe queue full at %d during "
+                                 "'%s': a Once handler from '%s' could not be "
+                                 "removed and will keep firing. Raise "
+                                 "MAX_DEFERRED_OPERATIONS.",
+                                 MAX_DEFERRED_OPERATIONS, g_event_names[event],
+                                 h->mod_name[0] ? h->mod_name : "<unknown>");
+                }
             }
         }
     }
