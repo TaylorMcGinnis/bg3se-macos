@@ -38,7 +38,8 @@ Prefer to do it by hand? A pre-built binary is on the [releases page](https://gi
 
 - macOS 12+ (tested on macOS 15.6.1 and macOS 26.2 Tahoe)
 - Apple Silicon Mac (recommended) or Intel Mac (limited functionality)
-- Baldur's Gate 3 (Steam)
+- Baldur's Gate 3 (Steam or GOG — see [docs/PORTING-GOG.md](docs/PORTING-GOG.md);
+  the two need different builds, and each refuses to run against the other's game)
 - Xcode Command Line Tools: `xcode-select --install`
 - CMake: `brew install cmake`
 

@@ -3,14 +3,30 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-BUILD_DYLIB="$PROJECT_DIR/build/lib/libbg3se.dylib"
 
 source "$SCRIPT_DIR/find_bg3.sh"
+
+# Which build tree to deploy from. A GOG install needs the GOG artifact -- the
+# extender disables addresses when artifact and game disagree. BG3SE_BUILD_DIR
+# overrides; otherwise pick by the installed game's store.
+if [[ -n "$BG3SE_BUILD_DIR" ]]; then
+    BUILD_DYLIB="$BG3SE_BUILD_DIR/lib/libbg3se.dylib"
+else
+    BG3_APP_PROBE="$(find_bg3_app)" || BG3_APP_PROBE=""
+    BUILD_DYLIB="$PROJECT_DIR/build/lib/libbg3se.dylib"
+    if [[ -n "$BG3_APP_PROBE" ]]; then
+        EXEC_PROBE="$(find_bg3_exec "$BG3_APP_PROBE")"
+        if [[ "$EXEC_PROBE" == *" GOG" && -f "$PROJECT_DIR/build-gog/lib/libbg3se.dylib" ]]; then
+            BUILD_DYLIB="$PROJECT_DIR/build-gog/lib/libbg3se.dylib"
+        fi
+    fi
+fi
 
 if [[ ! -f "$BUILD_DYLIB" ]]; then
     echo "Error: Build dylib not found at $BUILD_DYLIB"
     exit 1
 fi
+echo "Deploying from: $BUILD_DYLIB"
 
 # Missing game is a warning, not a build failure — build machines
 # without BG3 installed (CI, contributors) still get a usable dylib.

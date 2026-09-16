@@ -156,7 +156,7 @@ static ReplLocateResult replication_locate(void *entity_world,
 
     const char *detected_build = version_detect_get_version();
     if (!detected_build ||
-        strcmp(detected_build, GENERATED_TYPEIDS_BUILD_ID) != 0 ||
+        !version_detect_build_id_matches(GENERATED_TYPEIDS_BUILD_ID) ||
         strcmp(replicated_type->build_id, GENERATED_TYPEIDS_BUILD_ID) != 0) {
         return REPL_LOCATE_ERROR;
     }

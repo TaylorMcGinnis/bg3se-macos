@@ -104,11 +104,30 @@ set_target_properties(lua_static PROPERTIES OUTPUT_NAME "lua")
 # Main injection dylib
 # ============================================
 
+# Target game build (store variant)
+#
+# BG3's Steam and GOG builds share a version string but are different binaries
+# with different addresses, so one dylib serves exactly one of them. This picks
+# which src/gen/<store>/ directory lands on the include path; everything else
+# about the build is identical.
+set(BG3_STORE "steam" CACHE STRING "Which BG3 build to target: steam or gog")
+set_property(CACHE BG3_STORE PROPERTY STRINGS steam gog)
+if(NOT BG3_STORE MATCHES "^(steam|gog)$")
+    message(FATAL_ERROR "BG3_STORE must be 'steam' or 'gog' (got '${BG3_STORE}')")
+endif()
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/src/gen/${BG3_STORE}/build_identity.h")
+    message(FATAL_ERROR
+        "No generated address set for BG3_STORE='${BG3_STORE}'. "
+        "Generate one against that store's game binary -- see docs/PORTING-GOG.md.")
+endif()
+message(STATUS "BG3SE target store: ${BG3_STORE}")
+
 # ImGui library
 set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/lib/imgui)
 
 # Include paths
 include_directories(
+    ${CMAKE_SOURCE_DIR}/src/gen/${BG3_STORE}   # per-store addresses; must come first
     ${CMAKE_SOURCE_DIR}/lib
     ${CMAKE_SOURCE_DIR}/lib/Dobby/include
     ${CMAKE_SOURCE_DIR}/lib/lua/src
@@ -179,7 +198,7 @@ add_library(bg3se SHARED
     src/entity/guid_lookup.c
     src/entity/arm64_call.c
     src/entity/component_registry.c
-    src/entity/generated_component_registry.c
+    src/gen/${BG3_STORE}/generated_component_registry.c
     src/entity/component_lookup.c
     src/entity/component_typeid.c
     src/entity/component_property.c
@@ -403,8 +422,11 @@ if(BUILD_TESTS)
         tests/tier0/test_lua_runtime.c
         tests/tier0/test_guid_lookup.c
         tests/tier0/test_persistentvars.c
+        tests/tier0/test_build_identity.c
         tests/tier0/stub_logging.c
         src/core/safe_memory.c
+        src/core/version_detect.c
+        src/core/offset_table.c
         src/core/stdstring.c
         src/entity/guid_lookup.c
         src/osiris/pattern_scan.c
@@ -417,6 +439,7 @@ if(BUILD_TESTS)
     )
     target_include_directories(bg3se_test_tier0 PRIVATE
         ${CMAKE_SOURCE_DIR}/tests/tier0
+        ${CMAKE_SOURCE_DIR}/src/gen/${BG3_STORE}
         ${CMAKE_SOURCE_DIR}/src/core
         ${CMAKE_SOURCE_DIR}/src/osiris
         ${CMAKE_SOURCE_DIR}/src/entity
