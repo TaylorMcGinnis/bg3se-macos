@@ -309,9 +309,8 @@ bool component_typeid_ready(void) {
 // ============================================================================
 
 static bool component_typeid_runtime_build_matches(void) {
-    const char *detected_build = version_detect_get_version();
-    return detected_build != NULL && version_detect_matches() &&
-           strcmp(detected_build, GENERATED_TYPEIDS_BUILD_ID) == 0;
+    return version_detect_matches() &&
+           version_detect_build_id_matches(GENERATED_TYPEIDS_BUILD_ID);
 }
 
 static bool component_typeid_runtime_address(uint64_t preferred_va,

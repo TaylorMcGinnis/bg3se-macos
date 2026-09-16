@@ -1777,7 +1777,7 @@ static int lua_entity_create_component(lua_State *L) {
     const char *component = luaL_checkstring(L, 2);
     const VersionOffsets *offsets = offset_table_get();
     if (!version_detect_addresses_safe() || !offsets ||
-        strcmp(offsets->version, COMPONENT_OPS_VERIFIED_BUILD) != 0) {
+        strcmp(offset_table_game_version() ?: "", COMPONENT_OPS_VERIFIED_BUILD) != 0) {
         return create_component_fail(
             L, component,
             "ComponentOps dispatch is verified only for game build "
