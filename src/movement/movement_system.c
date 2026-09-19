@@ -165,6 +165,21 @@ static int lua_movement_get_capabilities(lua_State *L) {
     lua_setfield(L, -2, "SuspendedForCombat");
     lua_pushboolean(L, camera_signature_ok);
     lua_setfield(L, -2, "CameraPanBlock");
+
+    /* Live value of the task selector, so a failure to move can be told apart
+     * from a failure to patch. */
+    if (CORE_INPUT_MODE_FLAG_OFFSET_7398727 != 0 && supported) {
+        void *base = version_detect_get_binary_base();
+        uint8_t mode = 0;
+        if (base && safe_memory_read(
+                (mach_vm_address_t)((char *)base +
+                    CORE_INPUT_MODE_FLAG_OFFSET_7398727), &mode, sizeof(mode))) {
+            lua_pushinteger(L, (lua_Integer)mode);
+        } else {
+            lua_pushnil(L);
+        }
+        lua_setfield(L, -2, "InputModeFlag");
+    }
     lua_pushboolean(L,
         camera_instruction == CAMERA_SHOULD_MOVE_BLOCKED_7398727);
     lua_setfield(L, -2, "CameraPanBlocked");

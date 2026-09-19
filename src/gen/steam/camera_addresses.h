@@ -27,4 +27,8 @@
 #define MOVEMENT_UNLOCK_BRANCH_OFFSET_7398727     0x03444548ULL
 #define CAMERA_SHOULD_MOVE_STORE_OFFSET_7398727   0x0332c0d0ULL
 
+/* Unresolved for the Steam build (no Steam binary available to verify against).
+ * 0 disables the diagnostic rather than guessing by delta. */
+#define CORE_INPUT_MODE_FLAG_OFFSET_7398727       0ULL
+
 #endif /* BG3SE_GEN_CAMERA_ADDRESSES_H */

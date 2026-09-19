@@ -209,6 +209,7 @@ static atomic_flag g_adaptive_lock = ATOMIC_FLAG_INIT;
 static InputControllerOnInputEventFn g_original_input_event;
 static bool g_input_event_hook_installed;
 static bool g_input_event_hook_attempted;
+static _Atomic(uint64_t) g_rotated_input_calls;  /* diagnostic: is the task running? */
 static _Atomic(uint32_t) g_input_movement_mask;
 static _Atomic(bool) g_input_sneak_down;
 static _Atomic(uint64_t) g_input_target_handle;
@@ -833,6 +834,7 @@ static uint64_t input_controller_on_event_hook(void *controller,
  */
 static CameraVector3 get_rotated_input_hook(int16_t player_index,
                                              bool camera_relative) {
+    atomic_fetch_add_explicit(&g_rotated_input_calls, 1, memory_order_relaxed);
     CameraVector3 movement = g_original_get_rotated_input(player_index,
                                                            camera_relative);
     float magnitude = sqrtf(movement.x * movement.x +
@@ -1786,6 +1788,9 @@ static int lua_camera_get_state(lua_State *L) {
         lua_pushnumber(L,
             atomic_float_load(&g_native_move_magnitude_bits));
         lua_setfield(L, -2, "NativeMoveMagnitude");
+        lua_pushnumber(L, (lua_Number)atomic_load_explicit(
+            &g_rotated_input_calls, memory_order_relaxed));
+        lua_setfield(L, -2, "NativeMoveCalls");
         lua_pushinteger(L, atomic_load_explicit(&g_input_movement_mask,
                                                 memory_order_relaxed));
         lua_setfield(L, -2, "MovementMask");

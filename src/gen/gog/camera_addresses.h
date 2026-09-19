@@ -69,4 +69,9 @@
  * whole 138MB __TEXT segment, so this site is unambiguous. */
 #define CAMERA_SHOULD_MOVE_STORE_OFFSET_7398727   0x03323ff8ULL
 
+/* _gCore+0x58: selects which character movement task may run.
+ * MoveController::CanExecute rejects when it is 0; MoveInDirection::CanExecute
+ * rejects when it is non-zero. Diagnostic only. */
+#define CORE_INPUT_MODE_FLAG_OFFSET_7398727       0x08b1e4c0ULL
+
 #endif /* BG3SE_GEN_CAMERA_ADDRESSES_H */
