@@ -207,6 +207,7 @@ add_library(bg3se SHARED
     src/gen/gog/store_tables.c
     src/gen/steam/generated_component_registry.c
     src/gen/gog/generated_component_registry.c
+    src/gen/camera_addresses.c
     src/entity/component_lookup.c
     src/entity/component_typeid.c
     src/entity/component_property.c
