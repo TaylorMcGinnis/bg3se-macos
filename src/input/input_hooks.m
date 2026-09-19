@@ -13,8 +13,10 @@
 #import <AppKit/AppKit.h>
 #import <Carbon/Carbon.h>
 #import <pthread.h>
+#include <stdatomic.h>
 
 #include "input.h"
+#include "../camera/camera_system.h"
 #include "../core/logging.h"
 #include "../lua/lua_events.h"
 #include "../imgui/imgui_metal_backend.h"
@@ -39,6 +41,7 @@ static int s_next_hotkey_handle = 1;
 // CGEventTap
 static CFMachPortRef s_event_tap = NULL;
 static CFRunLoopSourceRef s_run_loop_source = NULL;
+static _Atomic(bool) s_caps_lock_active;
 
 // ============================================================================
 // Thread-safe Key Event Queue (drained from Lua-owning tick thread)
@@ -158,14 +161,22 @@ static CGEventRef event_tap_callback(CGEventTapProxy proxy, CGEventType type,
         case kCGEventMouseMoved:
         case kCGEventLeftMouseDragged:
         case kCGEventRightMouseDragged:
+        case kCGEventOtherMouseDragged:
             // CGEventTap is the ONLY reliable input source for SDL games
-            // NSView swizzling doesn't receive events from SDL
+            // NSView swizzling doesn't receive events from SDL. Middle-button
+            // dragging arrives as OtherMouseDragged on macOS.
             imgui_metal_process_mouse_move((float)screenLoc.x, (float)screenLoc.y);
+            camera_input_mouse_delta(
+                (double)CGEventGetIntegerValueField(event,
+                    kCGMouseEventDeltaX),
+                (double)CGEventGetIntegerValueField(event,
+                    kCGMouseEventDeltaY));
             break;
         case kCGEventScrollWheel: {
             double deltaX = CGEventGetDoubleValueField(event, kCGScrollWheelEventDeltaAxis2);
             double deltaY = CGEventGetDoubleValueField(event, kCGScrollWheelEventDeltaAxis1);
             imgui_metal_process_scroll((float)deltaX, (float)deltaY);
+            camera_input_scroll(deltaY);
             break;
         }
         default:
@@ -214,6 +225,8 @@ static CGEventRef event_tap_callback(CGEventTapProxy proxy, CGEventType type,
                 break;
             case kVK_CapsLock:
                 nowDown = (cgFlags & kCGEventFlagMaskAlphaShift) != 0;
+                atomic_store_explicit(&s_caps_lock_active, nowDown,
+                                      memory_order_release);
                 break;
             default:
                 return event;
@@ -344,6 +357,15 @@ bool input_init(void) {
         LOG_INPUT_INFO("Input Monitoring granted (keyboard events will be delivered)");
     }
 
+    // Seed Caps Lock from the current HID state: the tap only reports changes,
+    // so without this the camera's Caps Lock mouse-look starts out inverted
+    // whenever the game launches with Caps Lock already on.
+    CGEventFlags initial_flags = CGEventSourceFlagsState(
+        kCGEventSourceStateCombinedSessionState);
+    atomic_store_explicit(&s_caps_lock_active,
+        (initial_flags & kCGEventFlagMaskAlphaShift) != 0,
+        memory_order_release);
+
     // Create event tap for keyboard and mouse events
     CGEventMask eventMask = (1 << kCGEventKeyDown) |
                             (1 << kCGEventKeyUp) |
@@ -352,9 +374,12 @@ bool input_init(void) {
                             (1 << kCGEventLeftMouseUp) |
                             (1 << kCGEventRightMouseDown) |
                             (1 << kCGEventRightMouseUp) |
+                            (1 << kCGEventOtherMouseDown) |
+                            (1 << kCGEventOtherMouseUp) |
                             (1 << kCGEventMouseMoved) |
                             (1 << kCGEventLeftMouseDragged) |
                             (1 << kCGEventRightMouseDragged) |
+                            (1 << kCGEventOtherMouseDragged) |
                             (1 << kCGEventScrollWheel);
 
     // Tap at the HID level (lowest CGEvent tap point) rather than the session
@@ -444,6 +469,24 @@ bool input_is_initialized(void) {
     return s_initialized;
 }
 
+bool input_caps_lock_active(void) {
+    return atomic_load_explicit(&s_caps_lock_active, memory_order_acquire) &&
+           NSApp != nil && NSApp.active;
+}
+
+void input_set_relative_mouse_mode(bool enabled) {
+    /* This mode is owned by the mod and never changes BG3's MMB state. */
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (enabled) {
+            CGDisplayHideCursor(kCGDirectMainDisplay);
+            CGAssociateMouseAndMouseCursorPosition(false);
+        } else {
+            CGAssociateMouseAndMouseCursorPosition(true);
+            CGDisplayShowCursor(kCGDirectMainDisplay);
+        }
+    });
+}
+
 // ============================================================================
 // Public API - Hotkey Registration
 // ============================================================================
@@ -495,7 +538,15 @@ void input_clear_hotkeys(void) {
 
 bool input_is_key_pressed(uint16_t keyCode) {
     if (keyCode >= 256) return false;
-    return s_key_states[keyCode];
+    if (s_key_states[keyCode]) return true;
+
+    /*
+     * BG3 can grab ordinary keyboard events before a listen-only CGEventTap
+     * receives them (modifier FlagsChanged events still arrive). Query the
+     * HID state directly so polling hotkeys remain usable while the game owns
+     * keyboard focus. This is read-only and does not consume or inject input.
+     */
+    return CGEventSourceKeyState(kCGEventSourceStateHIDSystemState, keyCode);
 }
 
 uint32_t input_get_modifiers(void) {

@@ -79,7 +79,8 @@ echo "DYLIB: $DYLIB" >> "$LOG"
 # needs BG3SE_LOG_LEVEL=debug BG3SE_LOG_MODULES=Entity to reach the game.
 BG3SE_ENVS=()
 for var in BG3SE_NO_HOOKS BG3SE_NO_NET BG3SE_MINIMAL BG3SE_FORCE_ADDRESSES \
-           BG3SE_LOG_LEVEL BG3SE_LOG_MODULES BG3SE_DISABLE; do
+           BG3SE_LOG_LEVEL BG3SE_LOG_MODULES BG3SE_DISABLE \
+           BG3SE_LOAD_UNREGISTERED_MODS; do
     if [[ -n "${!var}" ]]; then
         BG3SE_ENVS+=("${var}=${!var}")
         echo "  ${var}=${!var}" >> "$LOG"

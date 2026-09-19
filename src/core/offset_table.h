@@ -72,7 +72,8 @@ typedef struct {
     uintptr_t spell_proto_mgr_ptr;      // SpellPrototypeManager::m_ptr
     uintptr_t rpgstats_ptr;             // RPGStats::m_ptr
     uintptr_t resource_mgr_ptr;         // ResourceManager::m_ptr
-    uintptr_t level_mgr_ptr;            // LevelManager::m_ptr
+    uintptr_t level_mgr_ptr;            // LevelManager::m_ptr (esv)
+    uintptr_t client_level_mgr_ptr;     // ecl::LevelManager::m_ptr (0 = unavailable)
     uintptr_t global_template_mgr_ptr;  // ls::GlobalTemplateManager::m_ptr
     uintptr_t cache_template_mgr_ptr;   // CacheTemplateManager::m_ptr
     uintptr_t level_cache_mgr_ptr;      // Level::s_CacheTemplateManager

@@ -697,10 +697,16 @@ int component_lookup_get_all_entities(uint64_t *outHandles, int maxHandles) {
     return totalCount;
 }
 
-int component_lookup_get_all_with_component(uint16_t componentTypeIndex,
-                                             uint64_t *outHandles,
-                                             int maxHandles) {
-    if (!component_lookup_ready() || !outHandles || maxHandles <= 0) {
+/*
+ * Shared body: the camera needs to enumerate in a specific EntityWorld (the
+ * client's), not whichever world was cached at init, so the container is a
+ * parameter and the two public entry points below choose it.
+ */
+static int get_all_with_component_from_container(void *container,
+                                                 uint16_t componentTypeIndex,
+                                                 uint64_t *outHandles,
+                                                 int maxHandles) {
+    if (!component_lookup_ready() || !container || !outHandles || maxHandles <= 0) {
         return 0;
     }
 
@@ -708,11 +714,11 @@ int component_lookup_get_all_with_component(uint16_t componentTypeIndex,
     bool isOneFrame = is_oneframe_component(componentTypeIndex);
 
     // Get Entities array from StorageContainer
-    GenericArray *entities = storage_container_get_entities(g_StorageContainer);
+    GenericArray *entities = storage_container_get_entities(container);
 
     // Debug: dump raw bytes to understand layout
     LOG_ENTITY_DEBUG("GetAllWithComponent: StorageContainer=%p (oneFrame=%s)",
-               g_StorageContainer, isOneFrame ? "YES" : "no");
+               container, isOneFrame ? "YES" : "no");
     LOG_ENTITY_DEBUG("  Entities.buf=%p, capacity=%u, size=%u",
                entities->buf, entities->capacity, entities->size);
 
@@ -777,6 +783,28 @@ int component_lookup_get_all_with_component(uint16_t componentTypeIndex,
     LOG_ENTITY_DEBUG("GetAllWithComponent: Found %d total entities%s",
                totalCount, isOneFrame ? " (one-frame)" : "");
     return totalCount;
+}
+
+static void *storage_container_for_world(void *entityWorld) {
+    if (!component_lookup_ready() || !entityWorld) return NULL;
+    return *(void **)((char *)entityWorld + ENTITYWORLD_STORAGE_OFFSET);
+}
+
+int component_lookup_get_all_with_component(uint16_t componentTypeIndex,
+                                             uint64_t *outHandles,
+                                             int maxHandles) {
+    return get_all_with_component_from_container(g_StorageContainer,
+                                                 componentTypeIndex,
+                                                 outHandles, maxHandles);
+}
+
+int component_lookup_get_all_with_component_in_world(void *entityWorld,
+                                                      uint16_t componentTypeIndex,
+                                                      uint64_t *outHandles,
+                                                      int maxHandles) {
+    return get_all_with_component_from_container(
+        storage_container_for_world(entityWorld), componentTypeIndex,
+        outHandles, maxHandles);
 }
 
 // Helper: Count entities in OneFrameComponents pool

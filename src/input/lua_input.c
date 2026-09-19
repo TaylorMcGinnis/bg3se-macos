@@ -90,6 +90,9 @@ static uint16_t parse_key_code(lua_State *L, int idx) {
         if (strcasecmp(name, "Grave") == 0 || strcasecmp(name, "Backtick") == 0 ||
             strcmp(name, "`") == 0 || strcmp(name, "~") == 0)
             return kVK_ANSI_Grave;
+        if (strcasecmp(name, "Backslash") == 0 || strcmp(name, "\\") == 0 ||
+            strcmp(name, "|") == 0)
+            return kVK_ANSI_Backslash;
 
         // Function keys
         if (strcasecmp(name, "F1") == 0) return kVK_F1;

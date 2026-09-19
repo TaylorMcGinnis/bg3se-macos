@@ -36,6 +36,11 @@ CURATED_NON_SURFACE_COMPONENTS = (
     "esv::Item",
     "esv::Character",
     "eoc::rest::LongRestInScriptPhase",
+    # The camera behaviours the third-person camera reads. Same situation as
+    # the entries above: real ComponentTypeIdContext types whose C++ names
+    # predate the *Component convention, so the surface scan never sees them.
+    "ecl::GameCameraBehavior",
+    "ecl::EocCameraBehavior",
 )
 
 CURATED_ONE_FRAME_COMPONENTS = (

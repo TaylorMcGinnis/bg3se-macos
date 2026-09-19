@@ -300,6 +300,7 @@ static struct {
     bool initialized;
     void *main_binary_base;
     void **level_manager_ptr;  // Points to global slot
+    void **client_level_manager_ptr;  // ecl::LevelManager::m_ptr slot
     bool aigrid_layout_verified;
     AiGridToTilePosFn aigrid_to_tile_pos;
     AiGridGetMetaDataFn aigrid_get_metadata;
@@ -332,6 +333,9 @@ bool level_manager_init(void *main_binary_base) {
     }
 
     g_level.level_manager_ptr = (void **)offset_table_resolve(off->level_mgr_ptr);
+    g_level.client_level_manager_ptr = off->client_level_mgr_ptr
+        ? (void **)offset_table_resolve(off->client_level_mgr_ptr)
+        : NULL;
 
     /*
      * Presence of every 7209685 AiGrid anchor is also the per-version layout
@@ -440,6 +444,44 @@ void *level_get_aigrid(void) {
         return NULL;
     }
 
+    return aigrid;
+}
+
+/*
+ * The camera reads the CLIENT level's AiGrid. level_get_current() above walks
+ * esv::LevelManager, whose current level is the server's -- in single-player
+ * they mirror each other, but the client slot is the correct one and is the
+ * only one that exists on a pure client. Returns NULL when the running build
+ * has no client_level_mgr_ptr row, so callers degrade instead of guessing.
+ */
+void *level_get_client_current(void) {
+    if (!g_level.initialized || !g_level.client_level_manager_ptr) return NULL;
+
+    void *manager = NULL;
+    if (!safe_memory_read_pointer(
+            (mach_vm_address_t)g_level.client_level_manager_ptr, &manager) ||
+        !manager) {
+        return NULL;
+    }
+
+    void *current = NULL;
+    if (!safe_memory_read_pointer(
+            (mach_vm_address_t)manager + LEVELMANAGER_CURRENT_LEVEL_OFFSET,
+            &current)) {
+        return NULL;
+    }
+    return current;
+}
+
+void *level_get_client_aigrid(void) {
+    void *level = level_get_client_current();
+    if (!level) return NULL;
+
+    void *aigrid = NULL;
+    if (!safe_memory_read_pointer(
+            (mach_vm_address_t)level + EOCLEVEL_AIGRID_OFFSET, &aigrid)) {
+        return NULL;
+    }
     return aigrid;
 }
 

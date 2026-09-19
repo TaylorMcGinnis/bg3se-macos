@@ -285,4 +285,11 @@ void lua_input_register(lua_State *L, int ext_table_index);
 #define kVK_ANSI_Period       0x2F
 #define kVK_ANSI_Slash        0x2C
 
+
+/** Persistent modifier and physical-button state observed by the event tap. */
+bool input_caps_lock_active(void);
+
+/** Enter or leave mod-owned macOS relative-mouse mode. */
+void input_set_relative_mouse_mode(bool enabled);
+
 #endif /* INPUT_H */

@@ -27,6 +27,8 @@ void* level_get_manager(void);        // LevelManager*
 void* level_get_current(void);        // EoCLevel*
 void* level_get_physics_scene(void);  // PhysicsSceneBase*
 void* level_get_aigrid(void);         // AiGrid*
+void* level_get_client_current(void); // ecl::EoCLevel*
+void* level_get_client_aigrid(void);  // client AiGrid* used by camera
 
 // ============================================================================
 // Physics Raycast Results

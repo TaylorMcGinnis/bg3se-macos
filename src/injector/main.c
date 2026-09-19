@@ -61,6 +61,8 @@ extern "C" {
 // Osiris modules
 #include "osiris_types.h"
 #include "../osiris/osi_call_guard.h"
+#include "../camera/camera_system.h"
+#include "../movement/movement_system.h"
 #include "osiris_functions.h"
 #include "custom_functions.h"
 #include "pattern_scan.h"
@@ -1043,6 +1045,12 @@ static void register_ext_api(lua_State *L) {
 
     // Ext.Timer namespace (timer system)
     lua_timer_register(L, -1);
+
+    // Ext.Camera namespace (validated client camera access)
+    lua_camera_register(L, -1);
+
+    // Ext.Movement namespace (keyboard-only direct movement unlock)
+    lua_movement_register(L, -1);
 
     // Ext.Vars namespace (persistent variables)
     lua_persistentvars_register(L, -1);

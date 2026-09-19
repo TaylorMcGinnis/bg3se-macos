@@ -35,4 +35,34 @@ void overlay_set_command_callback(overlay_command_callback callback);
 // Focus the input field (for hotkey activation)
 void overlay_focus_input(void);
 
+// Toggle a small native settings panel. This uses AppKit instead of injecting
+// another Metal command buffer into the game's presentation path.
+typedef struct {
+    bool wheel_enabled;
+    double fov;
+    double distance;
+    double horizontal_offset;
+    double vertical_offset;
+    double minimum_pitch;
+    double maximum_pitch;
+    bool invert_vertical;
+    bool adaptive_crouch;
+    bool hide_game_ui;
+} OverlayCameraProfile;
+
+#define OVERLAY_CAMERA_PROFILE_COUNT 4
+
+typedef struct {
+    bool enabled;
+    bool caps_lock_mouse_look;
+    int selected_profile;
+    OverlayCameraProfile profiles[OVERLAY_CAMERA_PROFILE_COUNT];
+} OverlayCameraSettings;
+
+typedef void (*overlay_settings_callback)(const char *key, double value);
+void overlay_settings_toggle(const char *title, const char *message,
+                             const OverlayCameraSettings *settings,
+                             overlay_settings_callback callback);
+void overlay_settings_select_profile(int profile);
+
 #endif // OVERLAY_H

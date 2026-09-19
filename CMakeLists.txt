@@ -158,6 +158,8 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/src/io
     ${CMAKE_SOURCE_DIR}/src/imgui
     ${CMAKE_SOURCE_DIR}/src/network
+    ${CMAKE_SOURCE_DIR}/src/camera
+    ${CMAKE_SOURCE_DIR}/src/movement
     ${CMAKE_SOURCE_DIR}/src/level
     ${CMAKE_SOURCE_DIR}/src/audio
     ${CMAKE_SOURCE_DIR}/src/core/mach_exc_stubs
@@ -284,6 +286,8 @@ add_library(bg3se SHARED
     src/hooks/arm64_hook.c
     src/io/path_override.c
     src/level/level_manager.c
+    src/camera/camera_system.c
+    src/movement/movement_system.c
     src/lua/lua_level.c
     src/audio/audio_manager.c
     src/lua/lua_audio.c

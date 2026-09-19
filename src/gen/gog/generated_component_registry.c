@@ -2036,6 +2036,8 @@ static const GeneratedComponentEntry g_CuratedOnlyAuthority[] = {
     { "esv::Item", "__ZN2ls6TypeIdIN3esv4ItemEN3ecs22ComponentTypeIdContextEE11m_TypeIndexE", "ecs::ComponentTypeIdContext", "4.1.1.7398727-gog", 0x10893e478ULL },
     { "esv::Character", "__ZN2ls6TypeIdIN3esv9CharacterEN3ecs22ComponentTypeIdContextEE11m_TypeIndexE", "ecs::ComponentTypeIdContext", "4.1.1.7398727-gog", 0x108941930ULL },
     { "eoc::rest::LongRestInScriptPhase", "__ZN2ls6TypeIdIN3eoc4rest21LongRestInScriptPhaseEN3ecs22ComponentTypeIdContextEE11m_TypeIndexE", "ecs::ComponentTypeIdContext", "4.1.1.7398727-gog", 0x108916910ULL },
+    { "ecl::GameCameraBehavior", "__ZN2ls6TypeIdIN3ecl18GameCameraBehaviorEN3ecs22ComponentTypeIdContextEE11m_TypeIndexE", "ecs::ComponentTypeIdContext", "4.1.1.7398727-gog", 0x1088d55c0ULL },
+    { "ecl::EocCameraBehavior", "__ZN2ls6TypeIdIN3ecl17EocCameraBehaviorEN3ecs22ComponentTypeIdContextEE11m_TypeIndexE", "ecs::ComponentTypeIdContext", "4.1.1.7398727-gog", 0x1088d55f8ULL },
 };
 
 static const GeneratedComponentEntry g_OneFrameAuthority[] = {

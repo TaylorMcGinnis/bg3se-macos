@@ -15,8 +15,51 @@
 #include "lua_ui.h"
 #include "../core/logging.h"
 #include "../ui/noesis.h"
+#include "../overlay/overlay.h"
+#include "../camera/camera_system.h"
+#include "lua_gate.h"
+#include "lua_runtime.h"
 
 #include "../../lib/lua/src/lauxlib.h"
+
+static int s_native_panel_callback_ref = LUA_NOREF;
+
+static void native_panel_changed(const char *key, double value) {
+    lua_gate_lock();
+    lua_State *L = lua_runtime_state_for(LUA_CONTEXT_SERVER);
+    if (!L || s_native_panel_callback_ref == LUA_NOREF) {
+        lua_gate_unlock();
+        return;
+    }
+
+    lua_rawgeti(L, LUA_REGISTRYINDEX, s_native_panel_callback_ref);
+    lua_pushstring(L, key ? key : "");
+    lua_pushnumber(L, value);
+    if (lua_pcall(L, 2, 0, 0) != LUA_OK) {
+        const char *error = lua_tostring(L, -1);
+        LOG_LUA_ERROR("Native panel callback failed: %s",
+                      error ? error : "unknown error");
+        lua_pop(L, 1);
+    }
+    lua_gate_unlock();
+}
+
+static double native_panel_number(lua_State *L, int table,
+                                  const char *field, double fallback) {
+    lua_getfield(L, table, field);
+    double value = lua_isnumber(L, -1) ? lua_tonumber(L, -1) : fallback;
+    lua_pop(L, 1);
+    return value;
+}
+
+static bool native_panel_boolean(lua_State *L, int table,
+                                 const char *field, bool fallback) {
+    lua_getfield(L, table, field);
+    bool value = lua_isboolean(L, -1) ? lua_toboolean(L, -1) : fallback;
+    lua_pop(L, 1);
+    return value;
+}
+
 
 #include <string.h>
 #include <mach-o/dyld.h>
@@ -591,6 +634,139 @@ static int lua_ui_scan_rm(lua_State *L) {
     return 1;
 }
 
+/** Ext.UI.SetHideUIWithMouseLook(enabled) -> true | false, reason */
+static int lua_ui_set_hide_ui_with_mouse_look(lua_State *L) {
+    bool enabled = lua_toboolean(L, 1) != 0;
+    const char *reason = NULL;
+    if (!camera_set_hide_ui_with_mouse_look(enabled, &reason)) {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, reason ? reason : "presentation control failed");
+        return 2;
+    }
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+/** Ext.UI.IsGameUIHidden() -> boolean | nil, reason */
+static int lua_ui_is_game_ui_hidden(lua_State *L) {
+    bool hidden = false;
+    const char *reason = NULL;
+    if (!camera_get_game_ui_hidden(&hidden, &reason)) {
+        lua_pushnil(L);
+        lua_pushstring(L, reason ? reason : "presentation state unavailable");
+        return 2;
+    }
+    lua_pushboolean(L, hidden);
+    return 1;
+}
+
+/**
+ * Ext.UI.ToggleNativePanel(title, message, settings, callback)
+ *
+ * Minimal macOS-native panel for mods that need a safe UI without inserting
+ * rendering work into BG3's Metal command stream.
+ */
+static int lua_ui_toggle_native_panel(lua_State *L) {
+    const char *title = luaL_optstring(L, 1, "Native Camera Tweaks");
+    const char *message = luaL_optstring(L, 2, "Minimal UI prototype");
+    luaL_checktype(L, 3, LUA_TTABLE);
+    luaL_checktype(L, 4, LUA_TFUNCTION);
+
+    OverlayCameraSettings settings = {
+        .enabled = native_panel_boolean(L, 3, "Enabled", true),
+        .caps_lock_mouse_look = native_panel_boolean(
+            L, 3, "CapsLockMouseLook", true),
+        .selected_profile = (int)native_panel_number(
+            L, 3, "SelectedProfile", 1.0),
+    };
+
+    double fallback_fov = native_panel_number(L, 3, "FOV", 60.0);
+    double fallback_close = native_panel_number(L, 3, "CloseZoom", 2.75);
+    double fallback_far = native_panel_number(L, 3, "FarZoom", 7.5);
+    double fallback_horizontal = native_panel_number(
+        L, 3, "HorizontalOffset", 0.625);
+    double fallback_vertical = native_panel_number(
+        L, 3, "VerticalOffset", 0.725);
+    double fallback_minimum_pitch = native_panel_number(
+        L, 3, "MinimumPitch", -10.0);
+    double fallback_maximum_pitch = native_panel_number(
+        L, 3, "MaximumPitch", 42.5);
+    bool fallback_invert = native_panel_boolean(
+        L, 3, "InvertVertical", false);
+    bool fallback_crouch = native_panel_boolean(
+        L, 3, "AdaptiveCrouch", false);
+
+    lua_getfield(L, 3, "Profiles");
+    bool has_profiles = lua_istable(L, -1);
+    for (int i = 0; i < OVERLAY_CAMERA_PROFILE_COUNT; i++) {
+        OverlayCameraProfile *profile = &settings.profiles[i];
+        profile->wheel_enabled = i < 2;
+        profile->distance = i == 1 ? fallback_far : fallback_close;
+        profile->fov = fallback_fov;
+        profile->horizontal_offset = fallback_horizontal;
+        profile->vertical_offset = fallback_vertical;
+        profile->minimum_pitch = fallback_minimum_pitch;
+        profile->maximum_pitch = fallback_maximum_pitch;
+        profile->invert_vertical = fallback_invert;
+        profile->adaptive_crouch = fallback_crouch;
+        profile->hide_game_ui = false;
+
+        if (has_profiles) {
+            lua_rawgeti(L, -1, i + 1);
+            if (lua_istable(L, -1)) {
+                int profile_table = lua_gettop(L);
+                profile->wheel_enabled = native_panel_boolean(
+                    L, profile_table, "WheelEnabled", profile->wheel_enabled);
+                profile->distance = native_panel_number(
+                    L, profile_table, "Distance", profile->distance);
+                profile->fov = native_panel_number(
+                    L, profile_table, "FOV", profile->fov);
+                profile->horizontal_offset = native_panel_number(
+                    L, profile_table, "HorizontalOffset",
+                    profile->horizontal_offset);
+                profile->vertical_offset = native_panel_number(
+                    L, profile_table, "VerticalOffset",
+                    profile->vertical_offset);
+                profile->minimum_pitch = native_panel_number(
+                    L, profile_table, "MinimumPitch",
+                    profile->minimum_pitch);
+                profile->maximum_pitch = native_panel_number(
+                    L, profile_table, "MaximumPitch",
+                    profile->maximum_pitch);
+                profile->invert_vertical = native_panel_boolean(
+                    L, profile_table, "InvertVertical",
+                    profile->invert_vertical);
+                profile->adaptive_crouch = native_panel_boolean(
+                    L, profile_table, "AdaptiveCrouch",
+                    profile->adaptive_crouch);
+                profile->hide_game_ui = native_panel_boolean(
+                    L, profile_table, "HideGameUI", false);
+            }
+            lua_pop(L, 1);
+        }
+    }
+    lua_pop(L, 1);
+
+    if (s_native_panel_callback_ref != LUA_NOREF) {
+        luaL_unref(L, LUA_REGISTRYINDEX, s_native_panel_callback_ref);
+    }
+    lua_pushvalue(L, 4);
+    s_native_panel_callback_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+
+    overlay_settings_toggle(title, message, &settings, native_panel_changed);
+    return 0;
+}
+
+static int lua_ui_select_native_panel_profile(lua_State *L) {
+    int profile = (int)luaL_checkinteger(L, 1);
+    if (profile < 1 || profile > OVERLAY_CAMERA_PROFILE_COUNT) {
+        return luaL_error(L, "profile index must be between 1 and %d",
+                          OVERLAY_CAMERA_PROFILE_COUNT);
+    }
+    overlay_settings_select_profile(profile);
+    return 0;
+}
+
 void lua_ext_register_ui(lua_State *L, int ext_table_idx) {
     // Normalize index
     if (ext_table_idx < 0) ext_table_idx = lua_gettop(L) + ext_table_idx + 1;
@@ -626,6 +802,18 @@ void lua_ext_register_ui(lua_State *L, int ext_table_idx) {
     lua_setfield(L, -2, "_ScanRM");
 
     // Set Ext.UI = table
+    lua_pushcfunction(L, lua_ui_set_hide_ui_with_mouse_look);
+    lua_setfield(L, -2, "SetHideUIWithMouseLook");
+
+    lua_pushcfunction(L, lua_ui_is_game_ui_hidden);
+    lua_setfield(L, -2, "IsGameUIHidden");
+
+    lua_pushcfunction(L, lua_ui_toggle_native_panel);
+    lua_setfield(L, -2, "ToggleNativePanel");
+
+    lua_pushcfunction(L, lua_ui_select_native_panel_profile);
+    lua_setfield(L, -2, "SelectNativePanelProfile");
+
     lua_setfield(L, ext_table_idx, "UI");
 
     noesis_init();

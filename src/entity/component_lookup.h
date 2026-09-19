@@ -184,6 +184,12 @@ int component_lookup_get_all_with_component(uint16_t componentTypeIndex,
                                              uint64_t *outHandles,
                                              int maxHandles);
 
+/** Enumerate entities with a component in an explicitly selected world. */
+int component_lookup_get_all_with_component_in_world(void *entityWorld,
+                                                      uint16_t componentTypeIndex,
+                                                      uint64_t *outHandles,
+                                                      int maxHandles);
+
 /**
  * Count entities with a specific component (without returning handles).
  *
