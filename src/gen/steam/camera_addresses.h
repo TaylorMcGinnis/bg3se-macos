@@ -31,4 +31,7 @@
  * 0 disables the diagnostic rather than guessing by delta. */
 #define CORE_INPUT_MODE_FLAG_OFFSET_7398727       0ULL
 
+/* Unresolved for steam; 0 disables the probe. */
+#define INPUT_IS_IN_SELECTOR_MODE_OFFSET_7398727  0ULL
+
 #endif /* BG3SE_GEN_CAMERA_ADDRESSES_H */

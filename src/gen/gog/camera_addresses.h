@@ -74,4 +74,8 @@
  * rejects when it is non-zero. Diagnostic only. */
 #define CORE_INPUT_MODE_FLAG_OFFSET_7398727       0x08b1e4c0ULL
 
+/* ecl::InputController::IsInSelectorMode(...). CanExecute rejects when this
+ * returns true; probed read-only to identify the gate. */
+#define INPUT_IS_IN_SELECTOR_MODE_OFFSET_7398727  0x02fd9d88ULL
+
 #endif /* BG3SE_GEN_CAMERA_ADDRESSES_H */
