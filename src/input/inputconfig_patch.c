@@ -81,7 +81,12 @@ static bool find_key_array(const char *buf, size_t len, const char *key,
  * character action only needs the keys.
  */
 static char *filter_keyboard_entries(const char *arr, size_t len) {
-    size_t cap = len + 8;
+    /*
+     * Twice the input, not len + 8. Each separator is written as ", " while
+     * the source may hold only ",", so the result can grow by one byte per
+     * entry. len + 8 overflowed past eight bindings.
+     */
+    size_t cap = len * 2 + 8;
     char *out = malloc(cap);
     if (!out) return NULL;
     size_t w = 0;
@@ -104,6 +109,17 @@ static char *filter_keyboard_entries(const char *arr, size_t len) {
     }
     out[w++] = ']';
     out[w] = '\0';
+
+    /*
+     * Refuse to write an empty binding. If the player has unbound the camera
+     * keys, or bound them to a controller only, copying the empty result would
+     * clear character movement and leave no way back except rebinding the
+     * camera. Leaving the previous value alone is the safer failure.
+     */
+    if (first) {
+        free(out);
+        return NULL;
+    }
     return out;
 }
 
@@ -240,7 +256,11 @@ bool inputconfig_patch_movement(void) {
         if (!find_key_array(buf, len, kCameraKeys[i], &cs, &ce)) continue;
 
         char *want = filter_keyboard_entries(buf + cs, ce - cs);
-        if (!want) continue;
+        if (!want) {
+            LOG_INPUT_DEBUG("[InputConfig] %s has no keyboard binding; %s left alone",
+                            kCameraKeys[i], kCharacterKeys[i]);
+            continue;
+        }
 
         size_t ts, te;
         if (!find_key_array(buf, len, kCharacterKeys[i], &ts, &te)) {
