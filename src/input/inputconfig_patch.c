@@ -171,17 +171,53 @@ static bool find_inputconfig(char *out, size_t out_size) {
            < (int)out_size;
 }
 
+/*
+ * The mod ships as a .pak, so an unpacked folder is no longer proof of
+ * anything. Ask the load order instead: modsettings.lsx names the mod only
+ * when the player has actually enabled it, which is the permission we want
+ * before touching their bindings. The unpacked folder is still accepted, for
+ * anyone running the mod from a working copy.
+ */
 static bool movement_mod_installed(void) {
     const char *home = getenv("HOME");
     if (!home) return false;
+
     char path[1024];
+    struct stat st;
+
     if (snprintf(path, sizeof(path),
                  "%s/Documents/Larian Studios/Baldur's Gate 3/Mods/%s",
-                 home, MOD_DIR_NAME) >= (int)sizeof(path)) {
+                 home, MOD_DIR_NAME) < (int)sizeof(path) &&
+        stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+        return true;
+    }
+
+    if (snprintf(path, sizeof(path),
+                 "%s/Documents/Larian Studios/Baldur's Gate 3/PlayerProfiles",
+                 home) >= (int)sizeof(path)) {
         return false;
     }
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+
+    DIR *d = opendir(path);
+    if (!d) return false;
+
+    bool enabled = false;
+    struct dirent *e;
+    while (!enabled && (e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.') continue;
+        char settings[1200];
+        if (snprintf(settings, sizeof(settings), "%s/%s/modsettings.lsx",
+                     path, e->d_name) >= (int)sizeof(settings)) {
+            continue;
+        }
+        size_t len = 0;
+        char *buf = read_file(settings, &len);
+        if (!buf) continue;
+        enabled = strstr(buf, "\"" MOD_DIR_NAME "\"") != NULL;
+        free(buf);
+    }
+    closedir(d);
+    return enabled;
 }
 
 bool inputconfig_patch_movement(void) {
