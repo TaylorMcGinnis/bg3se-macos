@@ -245,6 +245,7 @@ add_library(bg3se SHARED
     src/render/pipeline_wait_guard.c
     src/game/focus_hack.c
     src/input/input_hooks.m
+    src/input/inputconfig_patch.c
     src/input/focusless_input.m
     src/input/lua_input.c
     src/math/math_ext.c

@@ -62,6 +62,7 @@ extern "C" {
 #include "osiris_types.h"
 #include "../osiris/osi_call_guard.h"
 #include "../camera/camera_system.h"
+#include "../input/inputconfig_patch.h"
 #include "../movement/movement_system.h"
 #include "osiris_functions.h"
 #include "custom_functions.h"
@@ -7386,6 +7387,13 @@ static void bg3se_init(void) {
     // offsets. If the game version doesn't match, those offsets are wrong and
     // using them causes SIGSEGV (Issue #73, #78).
     t0 = t1;
+    /*
+     * Before BG3 reads its input config. CharacterMove* ships unbound and the
+     * Options screen cannot bind it, so point it at the camera bindings.
+     * A hook on App::LoadInputScheme would install too late for this load.
+     */
+    inputconfig_patch_movement();
+
     version_detect_init(NULL);  // Auto-detect BG3 app bundle path
     t1 = (uint64_t)timer_get_monotonic_ms();
     LOG_CORE_INFO("  version_detect_init: %llums", (unsigned long long)(t1 - t0));
