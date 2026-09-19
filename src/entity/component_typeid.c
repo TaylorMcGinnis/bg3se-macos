@@ -41,6 +41,14 @@ static const TypeIdEntry g_KnownTypeIds[] = {
     { "ecl::Character", 0, false, "ecs::ComponentTypeIdContext", false },
     { "ecl::Item", 0, false, "ecs::ComponentTypeIdContext", false },
 
+    // Camera behaviours read by the third-person camera. Sizes are asserted
+    // rather than harvested: camera_system.c refuses to touch the component
+    // unless the registry reports exactly these, so a layout change fails
+    // closed instead of writing through a stale offset map. Both verified for
+    // 4.1.1.7398727 (GameCameraBehavior 62 properties, EocCameraBehavior 13).
+    { "ecl::GameCameraBehavior", 0x258, false, "ecs::ComponentTypeIdContext", false },
+    { "ecl::EocCameraBehavior", 0x40, false, "ecs::ComponentTypeIdContext", false },
+
     // =====================================================================
     // esv:: proxy components: the ECS slot holds a pointer to the object
     // (esv::Item is 0xb0 bytes, esv::Character 0x1a8; upstream
