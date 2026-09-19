@@ -9,6 +9,7 @@
 #include "arm64_call.h"
 #include "../core/logging.h"
 #include "../core/offset_table.h"
+#include "../core/safe_memory.h"
 
 #include <string.h>
 
@@ -713,8 +714,14 @@ static int get_all_with_component_from_container(void *container,
     // Check if this is a one-frame component (bit 15 set)
     bool isOneFrame = is_oneframe_component(componentTypeIndex);
 
-    // Get Entities array from StorageContainer
+    // Get Entities array from StorageContainer. The container may have come
+    // from a caller-supplied world, so validate before walking it.
     GenericArray *entities = storage_container_get_entities(container);
+    if (!entities) {
+        LOG_ENTITY_DEBUG("GetAllWithComponent: no entities array for container %p",
+                         container);
+        return 0;
+    }
 
     // Debug: dump raw bytes to understand layout
     LOG_ENTITY_DEBUG("GetAllWithComponent: StorageContainer=%p (oneFrame=%s)",
@@ -785,9 +792,23 @@ static int get_all_with_component_from_container(void *container,
     return totalCount;
 }
 
+/*
+ * The world pointer comes from the caller, not from our own init, so it can be
+ * stale or not yet populated during session load. Read it the way the rest of
+ * this file does: a raw dereference here crashed the game inside
+ * storage_data_get_component_slot after iterating a garbage container
+ * (SIGSEGV, 2026-09-19).
+ */
 static void *storage_container_for_world(void *entityWorld) {
     if (!component_lookup_ready() || !entityWorld) return NULL;
-    return *(void **)((char *)entityWorld + ENTITYWORLD_STORAGE_OFFSET);
+
+    void *container = NULL;
+    if (!safe_memory_read_pointer(
+            (mach_vm_address_t)((char *)entityWorld + ENTITYWORLD_STORAGE_OFFSET),
+            &container)) {
+        return NULL;
+    }
+    return container;
 }
 
 int component_lookup_get_all_with_component(uint16_t componentTypeIndex,
