@@ -17,6 +17,7 @@
 
 #include "../core/safe_memory.h"
 #include "../core/version_detect.h"
+#include "../core/offset_table.h"
 #include "../core/logging.h"
 #include "../hooks/arm64_hook.h"
 #include "../core/safe_memory.h"
@@ -34,9 +35,29 @@
 #define CAMERA_SHOULD_MOVE_BLOCKED_7398727      0x390512dfU
 #define ARM64_NOP                             0xd503201fU
 
+/* CanExecute loads EoCGlobalSwitches then tests the dword at this offset; when
+ * it is zero the whole GetRotatedInput path is skipped, so direct movement can
+ * never engage regardless of the CanExecute patch. */
+#define GLOBAL_SWITCH_DIRECT_MOVE_OFFSET      0xe98
+
 /* Requested remains true while combat temporarily restores vanilla behavior. */
 static _Atomic(bool) g_movement_unlock_requested;
 static _Atomic(bool) g_combat_active;
+
+/* Saved so disabling restores whatever the game had, rather than forcing 0. */
+static _Atomic(int) g_direct_move_saved = -1;
+
+static uint32_t *direct_move_switch_address(void) {
+    const VersionOffsets *off = offset_table_get();
+    if (!off || !off->global_switches_ptr) return NULL;
+    void **slot = (void **)offset_table_resolve(off->global_switches_ptr);
+    void *switches = NULL;
+    if (!slot || !safe_memory_read_pointer((mach_vm_address_t)slot, &switches) ||
+        !switches) {
+        return NULL;
+    }
+    return (uint32_t *)((char *)switches + GLOBAL_SWITCH_DIRECT_MOVE_OFFSET);
+}
 
 /* --- read-only probe: is the selector-mode guard what rejects CanExecute? -- */
 static _Atomic(int) g_selector_last = -1;      /* -1 = never observed */
@@ -128,6 +149,33 @@ static bool movement_set_patch_state(bool enabled) {
     }
 
     if (enabled) {
+        /*
+         * CanExecute loads EoCGlobalSwitches and branches past GetRotatedInput
+         * when the dword at +0xe98 is zero, so the CanExecute patch alone can
+         * never produce movement: the call is skipped, not rejected. Measured
+         * zero on this install. Setting the engine's own switch is preferred
+         * over patching the branch -- it is the value the engine already reads.
+         */
+        uint32_t *sw = direct_move_switch_address();
+        if (sw) {
+            uint32_t cur = 0;
+            if (safe_memory_read((mach_vm_address_t)sw, &cur, sizeof(cur))) {
+                if (atomic_load_explicit(&g_direct_move_saved,
+                                         memory_order_acquire) < 0) {
+                    atomic_store_explicit(&g_direct_move_saved, (int)cur,
+                                          memory_order_release);
+                }
+                if (cur == 0) {
+                    uint32_t on = 1;
+                    if (safe_memory_write((mach_vm_address_t)sw, &on, sizeof(on))) {
+                        LOG_CORE_INFO("[Movement] direct-move switch was 0; set to 1");
+                    } else {
+                        LOG_CORE_ERROR("[Movement] could not set direct-move switch");
+                    }
+                }
+            }
+        }
+
         bool installed_camera_patch = false;
         if (camera_instruction == CAMERA_SHOULD_MOVE_ORIGINAL_7398727) {
             if (!arm64_write_instruction(camera_should_move_store_address(),
@@ -145,6 +193,14 @@ static bool movement_set_patch_state(bool enabled) {
             return false;
         }
     } else {
+        int saved = atomic_exchange_explicit(&g_direct_move_saved, -1,
+                                             memory_order_acq_rel);
+        uint32_t *sw = direct_move_switch_address();
+        if (sw && saved >= 0) {
+            uint32_t restore = (uint32_t)saved;
+            safe_memory_write((mach_vm_address_t)sw, &restore, sizeof(restore));
+        }
+
         if (movement_instruction == ARM64_NOP &&
             !arm64_write_instruction(movement_unlock_address(),
                                      MOVEMENT_UNLOCK_ORIGINAL_7398727)) {
@@ -178,6 +234,25 @@ void movement_update_combat_state(bool combat) {
     }
 }
 
+/* Writes BG3's own setting rather than patching code. */
+static int lua_movement_set_direct_move_switch(lua_State *L) {
+    uint32_t want = (uint32_t)luaL_checkinteger(L, 1);
+    uint32_t *sw = direct_move_switch_address();
+    if (!sw) {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, "EoCGlobalSwitches not resolvable");
+        return 2;
+    }
+    if (!safe_memory_write((mach_vm_address_t)sw, &want, sizeof(want))) {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, "write failed");
+        return 2;
+    }
+    LOG_CORE_INFO("[Movement] direct-move switch set to %u", want);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
 static int lua_movement_get_capabilities(lua_State *L) {
     uint32_t movement_instruction = 0;
     uint32_t camera_instruction = 0;
@@ -209,6 +284,17 @@ static int lua_movement_get_capabilities(lua_State *L) {
     lua_setfield(L, -2, "SuspendedForCombat");
     lua_pushboolean(L, camera_signature_ok);
     lua_setfield(L, -2, "CameraPanBlock");
+
+    {
+        uint32_t *sw = direct_move_switch_address();
+        uint32_t v = 0;
+        if (sw && safe_memory_read((mach_vm_address_t)sw, &v, sizeof(v))) {
+            lua_pushinteger(L, (lua_Integer)v);
+        } else {
+            lua_pushnil(L);
+        }
+        lua_setfield(L, -2, "DirectMoveSwitch");
+    }
 
     selector_probe_install();
     lua_pushinteger(L, (lua_Integer)atomic_load_explicit(&g_selector_last,
@@ -297,6 +383,7 @@ static int lua_movement_disable_keyboard(lua_State *L) {
 }
 
 static const struct luaL_Reg movement_functions[] = {
+    { "SetDirectMoveSwitch", lua_movement_set_direct_move_switch },
     { "GetCapabilities", lua_movement_get_capabilities },
     { "EnableKeyboardMovement", lua_movement_enable_keyboard },
     { "DisableKeyboardMovement", lua_movement_disable_keyboard },
