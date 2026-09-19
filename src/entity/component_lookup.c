@@ -408,9 +408,20 @@ void *component_lookup_by_index_in_world(void *entityWorld, uint64_t entityHandl
 
     // Component type indices are global (ecs::ComponentTypeIdContext), so the
     // same TypeId resolves in any world; only the storage container differs.
-    void *storageContainer = (entityWorld == g_EntityWorld)
-        ? g_StorageContainer
-        : *(void **)((char *)entityWorld + ENTITYWORLD_STORAGE_OFFSET);
+    //
+    // The cached world was validated at init and can be dereferenced directly.
+    // Any other world came from the caller and may be stale -- the camera
+    // passes one during session load -- so read it the safe way. The same
+    // pattern crashed storage_container_for_world (SIGSEGV, 2026-09-19).
+    void *storageContainer = NULL;
+    if (entityWorld == g_EntityWorld) {
+        storageContainer = g_StorageContainer;
+    } else if (!safe_memory_read_pointer(
+                   (mach_vm_address_t)((char *)entityWorld + ENTITYWORLD_STORAGE_OFFSET),
+                   &storageContainer)) {
+        LOG_ENTITY_DEBUG("ERROR: could not read StorageContainer for world %p", entityWorld);
+        return NULL;
+    }
     if (!storageContainer) {
         LOG_ENTITY_DEBUG("ERROR: StorageContainer is NULL for world %p", entityWorld);
         return NULL;
