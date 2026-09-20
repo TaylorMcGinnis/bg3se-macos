@@ -43,7 +43,7 @@ static const char *skip_string(const char *p, const char *end) {
  * Find "key" : [ ... ] and return the span of the array, brackets included.
  * Quoted text is skipped so a bracket inside a string cannot confuse this.
  */
-static bool find_key_array(const char *buf, size_t len, const char *key,
+bool inputconfig_find_key_array(const char *buf, size_t len, const char *key,
                            size_t *out_start, size_t *out_end) {
     char needle[128];
     int n = snprintf(needle, sizeof(needle), "\"%s\"", key);
@@ -80,7 +80,7 @@ static bool find_key_array(const char *buf, size_t len, const char *key,
  * Controller entries and the engine's unbound sentinels are dropped: the
  * character action only needs the keys.
  */
-static char *filter_keyboard_entries(const char *arr, size_t len) {
+char *inputconfig_filter_keyboard_entries(const char *arr, size_t len) {
     /*
      * Twice the input, not len + 8. Each separator is written as ", " while
      * the source may hold only ",", so the result can grow by one byte per
@@ -253,9 +253,9 @@ bool inputconfig_patch_movement(void) {
 
     for (int i = 0; i < 4; i++) {
         size_t cs, ce;
-        if (!find_key_array(buf, len, kCameraKeys[i], &cs, &ce)) continue;
+        if (!inputconfig_find_key_array(buf, len, kCameraKeys[i], &cs, &ce)) continue;
 
-        char *want = filter_keyboard_entries(buf + cs, ce - cs);
+        char *want = inputconfig_filter_keyboard_entries(buf + cs, ce - cs);
         if (!want) {
             LOG_INPUT_DEBUG("[InputConfig] %s has no keyboard binding; %s left alone",
                             kCameraKeys[i], kCharacterKeys[i]);
@@ -263,7 +263,7 @@ bool inputconfig_patch_movement(void) {
         }
 
         size_t ts, te;
-        if (!find_key_array(buf, len, kCharacterKeys[i], &ts, &te)) {
+        if (!inputconfig_find_key_array(buf, len, kCharacterKeys[i], &ts, &te)) {
             free(want);
             LOG_INPUT_DEBUG("[InputConfig] %s absent; skipped", kCharacterKeys[i]);
             continue;

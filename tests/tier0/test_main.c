@@ -18,6 +18,7 @@ void register_lua_runtime_tests(void);
 void register_guid_lookup_tests(void);
 void register_persistentvars_tests(void);
 void register_build_identity_tests(void);
+void register_inputconfig_patch_tests(void);
 
 int main(void) {
     printf("=== BG3SE Tier 0 Unit Tests ===\n\n");
@@ -31,6 +32,7 @@ int main(void) {
     register_guid_lookup_tests();
     register_persistentvars_tests();
     register_build_identity_tests();
+    register_inputconfig_patch_tests();
 
     printf("\n=== Results: %d/%d passed, %d failed ===\n",
            g_passed, g_passed + g_failed, g_failed);

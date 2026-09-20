@@ -471,6 +471,7 @@ endif()
 # ============================================
 # Tier 0: Native C unit tests (no game dependency)
 # ============================================
+option(BG3SE_TEST_ASAN "Build the Tier 0 tests with AddressSanitizer" OFF)
 option(BUILD_TESTS "Build Tier 0 unit test binary" ON)
 if(BUILD_TESTS)
     add_executable(bg3se_test_tier0
@@ -484,6 +485,8 @@ if(BUILD_TESTS)
         tests/tier0/test_guid_lookup.c
         tests/tier0/test_persistentvars.c
         tests/tier0/test_build_identity.c
+        tests/tier0/test_inputconfig_patch.c
+        src/input/inputconfig_patch.c
         tests/tier0/stub_logging.c
         src/core/safe_memory.c
         src/core/version_detect.c
@@ -499,6 +502,14 @@ if(BUILD_TESTS)
         src/lua/lua_persistentvars.c
         src/vars/campaign_key.c
     )
+    # A heap overrun is silent without this: the buffer-sizing regression test
+    # passes under a normal build even with the bug reintroduced, because malloc
+    # rounds the allocation up. Run with -DBG3SE_TEST_ASAN=ON to make it real.
+    if(BG3SE_TEST_ASAN)
+        target_compile_options(bg3se_test_tier0 PRIVATE -fsanitize=address -g)
+        target_link_options(bg3se_test_tier0 PRIVATE -fsanitize=address)
+    endif()
+
     target_include_directories(bg3se_test_tier0 PRIVATE
         ${CMAKE_SOURCE_DIR}/tests/tier0
         ${CMAKE_SOURCE_DIR}/src/gen
@@ -507,6 +518,7 @@ if(BUILD_TESTS)
         ${CMAKE_SOURCE_DIR}/src/entity
         ${CMAKE_SOURCE_DIR}/src/mod
         ${CMAKE_SOURCE_DIR}/src/lua
+        ${CMAKE_SOURCE_DIR}/src/input
         ${LUA_SRC_DIR}
     )
     target_link_libraries(bg3se_test_tier0 PRIVATE lua_static "-framework Foundation")

@@ -2,6 +2,7 @@
 #define BG3SE_INPUTCONFIG_PATCH_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 /**
  * Copy the player's camera movement bindings onto the character movement
@@ -19,5 +20,24 @@
  * Returns true when the file was rewritten.
  */
 bool inputconfig_patch_movement(void);
+
+
+/*
+ * Exposed for tests only. These carry the two failure modes worth pinning: a
+ * result longer than its source, and an empty result that must not be written
+ * over a player's bindings. The test links this object rather than including
+ * the .c, so the dependency is one CMake actually tracks.
+ */
+
+/** Locate "key" : [ ... ] and return the span of the array, brackets included. */
+bool inputconfig_find_key_array(const char *buf, size_t len, const char *key,
+                                size_t *out_start, size_t *out_end);
+
+/**
+ * Rebuild an array body keeping only usable keyboard entries.
+ * Returns NULL when nothing usable remains, so callers leave the target alone.
+ * Caller frees.
+ */
+char *inputconfig_filter_keyboard_entries(const char *arr, size_t len);
 
 #endif
