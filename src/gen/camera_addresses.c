@@ -24,7 +24,6 @@ static const CameraAddresses kSteam = {
     .movement_unlock_branch           = 0x03444548ULL,
     .camera_should_move_store         = 0x0332c0d0ULL,
     .core_input_mode_flag             = 0ULL,
-    .input_is_in_selector_mode        = 0ULL,
 };
 
 static const CameraAddresses kGog = {
@@ -42,7 +41,6 @@ static const CameraAddresses kGog = {
     .movement_unlock_branch           = 0x0343c470ULL,
     .camera_should_move_store         = 0x03323ff8ULL,
     .core_input_mode_flag             = 0x08b1e4c0ULL,
-    .input_is_in_selector_mode        = 0x02fd9d88ULL,
 };
 
 static const CameraAddresses kUnknown = { .store = "unknown" };

@@ -35,7 +35,6 @@ typedef struct {
     uint64_t movement_unlock_branch;
     uint64_t camera_should_move_store;
     uint64_t core_input_mode_flag;
-    uint64_t input_is_in_selector_mode;
 } CameraAddresses;
 
 /* Never NULL: an unknown store yields an all-zero table, so every lookup
@@ -55,6 +54,5 @@ const CameraAddresses *camera_addresses_get(void);
 #define MOVEMENT_UNLOCK_BRANCH_OFFSET_7398727 (camera_addresses_get()->movement_unlock_branch)
 #define CAMERA_SHOULD_MOVE_STORE_OFFSET_7398727 (camera_addresses_get()->camera_should_move_store)
 #define CORE_INPUT_MODE_FLAG_OFFSET_7398727 (camera_addresses_get()->core_input_mode_flag)
-#define INPUT_IS_IN_SELECTOR_MODE_OFFSET_7398727 (camera_addresses_get()->input_is_in_selector_mode)
 
 #endif /* BG3SE_GEN_CAMERA_ADDRESSES_H */

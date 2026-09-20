@@ -22,7 +22,6 @@
 #include "../hooks/arm64_hook.h"
 #include "../core/safe_memory.h"
 
-#include <dobby.h>
 
 #include <lauxlib.h>
 #include <stdbool.h>
@@ -60,53 +59,7 @@ static uint32_t *direct_move_switch_address(void) {
     return (uint32_t *)((char *)switches + GLOBAL_SWITCH_DIRECT_MOVE_OFFSET);
 }
 
-/* --- read-only probe: is the selector-mode guard what rejects CanExecute? -- */
-static _Atomic(int) g_selector_last = -1;      /* -1 = never observed */
-static _Atomic(uint64_t) g_selector_calls;
-static bool (*g_orig_selector_mode)(void *, void *);
-static bool g_selector_hooked;
 
-static bool selector_mode_probe(void *self, void *view) {
-    bool r = g_orig_selector_mode(self, view);
-    atomic_store_explicit(&g_selector_last, r ? 1 : 0, memory_order_relaxed);
-    atomic_fetch_add_explicit(&g_selector_calls, 1, memory_order_relaxed);
-    return r;
-}
-
-static const uint8_t kSelectorPrologue7398727[] = {
-    0xff, 0x43, 0x07, 0xd1, 0xfc, 0x6f, 0x17, 0xa9,
-    0xfa, 0x67, 0x18, 0xa9, 0xf8, 0x5f, 0x19, 0xa9
-};
-
-/*
- * Diagnostic only, and off by default. GetCapabilities is called during normal
- * play, so installing this unconditionally would put a permanent hook into a
- * hot game function to answer a question nobody is asking. Set
- * BG3SE_DEBUG_SELECTOR_PROBE=1 to turn it on.
- */
-static void selector_probe_install(void) {
-    if (g_selector_hooked || INPUT_IS_IN_SELECTOR_MODE_OFFSET_7398727 == 0) return;
-    if (!getenv("BG3SE_DEBUG_SELECTOR_PROBE")) return;
-    if (!version_detect_addresses_safe()) return;
-    void *base = version_detect_get_binary_base();
-    if (!base) return;
-    void *target = (char *)base + INPUT_IS_IN_SELECTOR_MODE_OFFSET_7398727;
-    uint8_t seen[sizeof(kSelectorPrologue7398727)];
-    if (!safe_memory_read((mach_vm_address_t)target, seen, sizeof(seen)) ||
-        memcmp(seen, kSelectorPrologue7398727, sizeof(seen)) != 0) {
-        LOG_CORE_ERROR("[Movement] selector probe: signature mismatch");
-        g_selector_hooked = true;   /* fail closed, do not retry */
-        return;
-    }
-    if (DobbyHook(target, (void *)selector_mode_probe,
-                  (void **)&g_orig_selector_mode) != 0 || !g_orig_selector_mode) {
-        LOG_CORE_ERROR("[Movement] selector probe: hook failed");
-        g_selector_hooked = true;
-        return;
-    }
-    g_selector_hooked = true;
-    LOG_CORE_INFO("[Movement] selector-mode probe installed at %p", target);
-}
 
 static bool movement_build_supported(void) {
 #if defined(__APPLE__) && defined(__arm64__)
@@ -303,14 +256,6 @@ static int lua_movement_get_capabilities(lua_State *L) {
         }
         lua_setfield(L, -2, "DirectMoveSwitch");
     }
-
-    selector_probe_install();
-    lua_pushinteger(L, (lua_Integer)atomic_load_explicit(&g_selector_last,
-                                                         memory_order_relaxed));
-    lua_setfield(L, -2, "SelectorModeLast");
-    lua_pushnumber(L, (lua_Number)atomic_load_explicit(&g_selector_calls,
-                                                       memory_order_relaxed));
-    lua_setfield(L, -2, "SelectorModeCalls");
 
     /* Live value of the task selector, so a failure to move can be told apart
      * from a failure to patch. */
