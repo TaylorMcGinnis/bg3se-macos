@@ -129,8 +129,8 @@ BG3_APP_BUNDLE = resolve_bg3_app_bundle()
 BG3_EXEC = resolve_bg3_executable(BG3_APP_BUNDLE)
 BG3_STORE = resolve_bg3_store(BG3_EXEC)
 
-# Generated address tables live per store, selected by -DBG3_STORE at compile
-# time. Audits want the installed game's store; offline analysis of the
+# Generated address tables live per store, and the dylib selects between them
+# at runtime. Audits want the installed game's store; offline analysis of the
 # checked-in tables can override with BG3SE_GEN_STORE.
 GEN_STORE = os.environ.get("BG3SE_GEN_STORE") or BG3_STORE
 GEN_DIR = PROJECT_ROOT / "src/gen" / GEN_STORE

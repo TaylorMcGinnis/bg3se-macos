@@ -3,7 +3,7 @@
 Companion to [PORTING.md](PORTING.md), which covers re-porting to a new game
 version. Read that first — the mechanics are the same and are not repeated here.
 
-## Why GOG needs its own build
+## Why GOG needs its own addresses
 
 Steam and GOG ship the same game version as different binaries. Both report
 `CFBundleShortVersionString = 4.1.1.7398727`, and every address differs:
@@ -19,9 +19,10 @@ Four deltas, so no single shift applies; every address is resolved
 independently. The existing tooling already does that, which is why GOG support
 needed no new reverse engineering.
 
-About 4,700 of those addresses are compile-time constants in
-`generated_typeids.h` and friends, so one dylib serves one game build. Hence
-`-DBG3_STORE=steam|gog` and two release artifacts.
+About 4,700 of those addresses are generated constants in
+`generated_typeids.h` and friends. Both stores' tables are compiled into one
+dylib and selected at runtime, so there is one build and one release artifact.
+See [One dylib, both stores](#one-dylib-both-stores) below.
 
 ## GOG bundle layout
 
@@ -40,9 +41,37 @@ game binary directly.
 
 Anything keyed on `CFBundleShortVersionString` alone will match the wrong
 store's addresses. Non-Steam rows in `offset_table.c` are keyed
-`<version>-<store>`, and `src/gen/<store>/build_identity.h` carries the binary's
-`LC_UUID` so a mismatched artifact disables addresses instead of corrupting
+`<version>-<store>`, and `src/gen/build_identity.c` carries each binary's
+`LC_UUID` so an unrecognised game disables addresses instead of corrupting
 memory.
+
+## One dylib, both stores
+
+Every store's generated tables are compiled in, and the dylib picks between
+them at runtime from the store detected in the loaded image's path — the same
+source `offset_table.c` already used to pick its row. A build is therefore
+never tied to one store, and cannot be pointed at the wrong game.
+
+| Layer | Selected by |
+|---|---|
+| `offset_table.c` rows | store, at runtime (pre-existing) |
+| Build identity and `LC_UUID` | `src/gen/build_identity.c`, lookup by store |
+| Component TypeId tables | `src/gen/generated_registry.c`, dispatched |
+| `g_system_names`, `k_replicated_type_globals` | `src/gen/store_tables.c`, dispatched |
+
+The component tables needed no change to `tools/extract_typeids.py`. Each
+store's generated file is compiled with its own `src/gen/<store>` on the include
+path and its public functions renamed, using per-source `COMPILE_OPTIONS`.
+
+Adding a store means adding a `src/gen/<store>/` directory and naming it in
+`BG3_STORES`. CMake fails the configure if a named store has no generated
+tables, so a half-added store cannot build.
+
+The cost is about 186KB of dylib for the second component table.
+
+An unrecognised store, or a binary whose `LC_UUID` is not in the table,
+disables addresses rather than guessing. That is the same fail-closed path a
+version mismatch already took.
 
 ## Re-porting to a new GOG build
 
@@ -68,7 +97,7 @@ python3 tools/port_offsets.py record --binary "$BIN" --version "$VER" \
 #    Fill the two anonymous slots in by hand; the resolver emits 0 for them.
 python3 tools/port_offsets.py resolve --binary "$BIN" --version "$VER" --emit
 
-# 4. Regenerate the compile-time address tables.
+# 4. Regenerate this store's address tables.
 python3 tools/extract_typeids.py "$BIN" --build-id "$VER" --registry \
     --header-out   src/gen/gog/generated_typeids.h \
     --registry-out src/gen/gog/generated_component_registry.c
@@ -76,14 +105,16 @@ python3 tools/generate_remove_component.py --binary "$BIN" --build-id "$VER" \
     --out src/gen/gog/generated_remove_component.h
 
 # 5. Update the build identity so the runtime guard matches this binary.
-dwarfdump --uuid "$BIN" | grep arm64      # → BG3SE_TARGET_BINARY_UUID
-$EDITOR src/gen/gog/build_identity.h      # also bump BG3SE_TARGET_VERSION
+dwarfdump --uuid "$BIN" | grep arm64      # → this store's arm64 LC_UUID
+$EDITOR tools/gen_build_identity.py       # edit SUPPORTED_BUILDS, then:
+python3 tools/gen_build_identity.py       # regenerates src/gen/build_identity.*
+#    --check reports drift without writing, for CI and the audits.
 
-# 6. Build and check.
-cmake -B build-gog -DBG3_STORE=gog && cmake --build build-gog
+# 6. Build and check. One build serves every store.
+cmake -B build && cmake --build build
 python3 tools/port_offsets.py verify --binary "$BIN" --version "$VER"
 PYTHONPATH=tools pytest tests/harness/ -q
-./build-gog/bin/bg3se_test_tier0
+./build/bin/bg3se_test_tier0
 ```
 
 `verify` must end with `✓ all N fields + M game functions match`.

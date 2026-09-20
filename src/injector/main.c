@@ -7339,7 +7339,7 @@ static void bg3se_init(void) {
      * and "the extender does nothing" is the same symptom as a mismatched
      * build. This line answers that from the log alone. */
     LOG_CORE_INFO("=== %s v%s (%s build, targets %s) initialized ===",
-                  BG3SE_NAME, BG3SE_VERSION, BG3SE_TARGET_STORE,
+                  BG3SE_NAME, BG3SE_VERSION, BG3SE_SUPPORTED_STORES,
                   BG3SE_TARGET_VERSION);
     LOG_CORE_INFO("Running in process: %s (PID: %d)", getprogname(), getpid());
 

@@ -60,15 +60,14 @@ fi
 # Prefer the dylib deployed next to the game (what the mod manager installs),
 # then a local build tree.
 DYLIB="$(dirname "$EXEC_PATH")/libbg3se.dylib"
-[[ -f "$DYLIB" ]] || DYLIB="${PROJECT_ROOT}/build-gog/lib/libbg3se.dylib"
 [[ -f "$DYLIB" ]] || DYLIB="${PROJECT_ROOT}/build/lib/libbg3se.dylib"
 
 if [[ ! -f "$DYLIB" ]]; then
     {
         echo "ERROR: libbg3se.dylib not found."
-        echo "ERROR: build it with: cmake -B build-gog -DBG3_STORE=gog && cmake --build build-gog"
-        echo "ERROR: the GOG build is required -- the Steam artifact refuses to touch"
-        echo "ERROR: addresses on a GOG install, because they are different addresses."
+        echo "ERROR: build it with: cmake -B build && cmake --build build"
+        echo "ERROR: one dylib serves both stores; it reads the store from the"
+        echo "ERROR: loaded game and selects that store's addresses at runtime."
     } | tee -a "$LOG" >&2
     exit 1
 fi

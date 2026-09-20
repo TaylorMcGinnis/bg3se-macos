@@ -480,30 +480,34 @@ bool version_detect_addresses_safe(void) {
         static bool identity_warned = false;
         const char *store = version_detect_get_store();
 
+        // One dylib carries addresses for several stores, so the question is
+        // whether this game's store is among them, not whether it equals a
+        // single compile-time target.
         if (strcmp(store, "unknown") != 0 &&
-            strcmp(store, BG3SE_TARGET_STORE) != 0) {
+            !build_identity_supports_store(store)) {
             if (!identity_warned) {
-                log_message("[WARN] [VersionDetect] This is the %s build of BG3SE, but "
-                            "the running game is the %s build. Their addresses differ even "
-                            "at the same game version. Address-dependent features are "
-                            "DISABLED — install the %s artifact instead. "
+                log_message("[WARN] [VersionDetect] The running game is the %s build, and "
+                            "this BG3SE has addresses only for: %s. Addresses differ "
+                            "between stores even at the same game version, so "
+                            "address-dependent features are DISABLED. "
                             "(BG3SE_FORCE_ADDRESSES=1 overrides, and will likely crash.)",
-                            BG3SE_TARGET_STORE, store, store);
+                            store, BG3SE_SUPPORTED_STORES);
                 identity_warned = true;
             }
             return false;
         }
 
         const char *uuid = version_detect_get_binary_uuid();
-        if (BG3SE_TARGET_BINARY_UUID[0] && uuid &&
-            strcmp(uuid, BG3SE_TARGET_BINARY_UUID) != 0) {
+        const char *expected_uuid = build_identity_uuid_for_store(store);
+        if (expected_uuid && expected_uuid[0] && uuid &&
+            strcmp(uuid, expected_uuid) != 0) {
             if (!identity_warned) {
                 log_message("[WARN] [VersionDetect] Game binary UUID %s does not match the "
-                            "build these addresses came from (%s). The game was patched or "
-                            "replaced. Address-dependent features DISABLED. "
+                            "%s build these addresses came from (%s). The game was patched "
+                            "or replaced. Address-dependent features DISABLED. "
                             "Re-port with tools/port_offsets.py, or set "
                             "BG3SE_FORCE_ADDRESSES=1 to override.",
-                            uuid, BG3SE_TARGET_BINARY_UUID);
+                            uuid, store, expected_uuid);
                 identity_warned = true;
             }
             return false;

@@ -3,7 +3,7 @@
  *
  * The store suffix and the binary's LC_UUID are what gate address-dependent
  * features, because the version string cannot tell Steam and GOG apart (see
- * src/gen/<store>/build_identity.h). A regression here means a mismatched dylib
+ * src/gen/build_identity.h). A regression here means a mismatched dylib
  * reads wrong memory instead of refusing to run.
  *
  * Mach-O headers are synthesised rather than read from an install: CI has no
@@ -12,6 +12,7 @@
 
 #include "test_harness.h"
 #include "version_detect.h"
+#include "build_identity.h"
 
 #include <mach-o/loader.h>
 #include <string.h>
@@ -205,7 +206,47 @@ TEST(build_id_rejects_null_and_empty) {
     ASSERT_FALSE(version_detect_build_id_matches(""));
 }
 
+/* ---------------------------------------------------------------- */
+/* Supported-build lookup                                            */
+/* ---------------------------------------------------------------- */
+
+/* One dylib carries several stores now, so the gate asks "is this store one of
+ * mine", not "does this store equal my single compile-time target". */
+TEST(identity_knows_both_shipped_stores) {
+    ASSERT_TRUE(build_identity_supports_store("gog"));
+    ASSERT_TRUE(build_identity_supports_store("steam"));
+}
+
+TEST(identity_rejects_unknown_stores) {
+    ASSERT_FALSE(build_identity_supports_store("unknown"));
+    ASSERT_FALSE(build_identity_supports_store("epic"));
+    ASSERT_FALSE(build_identity_supports_store(""));
+    ASSERT_FALSE(build_identity_supports_store(NULL));
+}
+
+/* Each store must carry its own UUID. Returning one store's UUID for the other
+ * would let a mismatched binary pass the check that exists to catch it. */
+TEST(identity_uuids_are_per_store_and_differ) {
+    const char *gog = build_identity_uuid_for_store("gog");
+    const char *steam = build_identity_uuid_for_store("steam");
+    ASSERT_TRUE(gog != NULL && steam != NULL);
+    ASSERT_TRUE(gog[0] != 0 && steam[0] != 0);
+    ASSERT_FALSE(strcmp(gog, steam) == 0);
+    /* uppercase-hyphenated, as dwarfdump prints and as the check compares */
+    ASSERT_EQ(strlen(gog), 36u);
+    ASSERT_EQ(strlen(steam), 36u);
+}
+
+TEST(identity_uuid_is_null_for_unsupported_store) {
+    ASSERT_TRUE(build_identity_uuid_for_store("epic") == NULL);
+    ASSERT_TRUE(build_identity_uuid_for_store(NULL) == NULL);
+}
+
 void register_build_identity_tests(void) {
+    RUN_TEST(identity_knows_both_shipped_stores);
+    RUN_TEST(identity_rejects_unknown_stores);
+    RUN_TEST(identity_uuids_are_per_store_and_differ);
+    RUN_TEST(identity_uuid_is_null_for_unsupported_store);
     RUN_TEST(build_id_matches_across_store_suffix);
     RUN_TEST(build_id_rejects_a_different_version);
     RUN_TEST(build_id_rejects_null_and_empty);

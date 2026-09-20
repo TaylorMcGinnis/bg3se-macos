@@ -9,7 +9,7 @@ This guide covers installation, building, and running BG3SE-macOS.
 - macOS 12+ (tested on macOS 15.6.1)
 - Apple Silicon Mac (for full functionality) or Intel Mac (limited)
 - Baldur's Gate 3 4.1.1.7398727, Steam or GOG
-  (GOG: build with `-DBG3_STORE=gog` and launch via `scripts/bg3g.sh` —
+  (one build serves both; GOG launches via `scripts/bg3g.sh` —
   see [PORTING-GOG.md](PORTING-GOG.md))
 - Xcode Command Line Tools: `xcode-select --install`
 - CMake: `brew install cmake`

@@ -39,9 +39,9 @@ python3 tools/port_offsets.py resolve --emit
 # 3. Paste the generated VersionOffsets entry into g_offset_table[]. Each row
 #    contains a GameFunctionId-indexed address array, so no schema change is
 #    needed when a fourth or later game version is added. Then:
-cmake -B build -DBG3_STORE=steam && cmake --build build
-#    (-DBG3_STORE selects src/gen/<store>/, the compile-time address tables.
-#     It defaults to steam; a GOG build needs -DBG3_STORE=gog.)
+cmake -B build && cmake --build build
+#    (One build serves every store. Each store's tables in src/gen/<store>/
+#     are compiled in and selected at runtime from the loaded game.)
 
 # 4. Launch, load a save, and run the regression suite:
 #    !test        (in the SE console)  -> expect 109/109
