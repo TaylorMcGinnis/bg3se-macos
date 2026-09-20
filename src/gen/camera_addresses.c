@@ -11,36 +11,36 @@
 
 static const CameraAddresses kSteam = {
     .store = "steam",
-    .camera_get_pitch                 = 0x034f303cULL,
-    .aigrid_get_height                = 0x01136a94ULL,
-    .input_controller_on_event        = 0x02fdf38cULL,
-    .get_rotated_input                = 0x03446808ULL,
-    .get_darkness_component           = 0x0157201cULL,
-    .game_input_on_event              = 0x02fa0110ULL,
-    .app_on_input_event               = 0x00c65184ULL,
-    .input_manager_get_value          = 0x064d6ba8ULL,
-    .input_manager_singleton_ptr      = 0x08b25d08ULL,
-    .camera_definition_singleton_ptr  = 0x08b25f40ULL,
-    .movement_unlock_branch           = 0x03444548ULL,
-    .camera_should_move_store         = 0x0332c0d0ULL,
-    .core_input_mode_flag             = 0ULL,
+    .camera_get_pitch                = 0x034f303cULL,   /* ecl::GameCameraBehavior::GetCameraPitchDegrees(bool, bool) const */
+    .aigrid_get_height               = 0x01136a94ULL,   /* eoc::AiGrid::GetHeightInArea(Vector3f const&, float) const */
+    .input_controller_on_event       = 0x02fdf38cULL,   /* ecl::InputController::OnInputEvent(ls::InputEvent const&) */
+    .get_rotated_input               = 0x03446808ULL,   /* (anonymous namespace)::GetRotatedInput(short, bool) */
+    .get_darkness_component          = 0x0157201cULL,   /* ecs::EntityWorld::GetComponent<eoc::DarknessComponent const, true> -- the CONST instantiation; the non-const twin shares its prologue */
+    .game_input_on_event             = 0x02fa0110ULL,   /* ecl::GameInput::OnInputEvent(ls::InputEvent const&) */
+    .app_on_input_event              = 0x00c65184ULL,   /* App::OnInputEvent(ls::InputEvent const&) */
+    .input_manager_get_value         = 0x064d6ba8ULL,   /* ls::InputManager::GetInputValue(unsigned int const&, ls::EInputPlayerIndex) const */
+    .input_manager_singleton_ptr     = 0x08b25d08ULL,   /* ls::InputManager::m_ptr (__DATA) */
+    .camera_definition_singleton_ptr = 0x08b25f40ULL,   /* EoCGlobalSwitches (__DATA). Symbol is a bare _Global; confirm it by the adrp/ldr pair at GetCameraPitchDegrees+0x20 */
+    .movement_unlock_branch          = 0x03444548ULL,   /* patch site in ecl::CharacterTask_MoveController::CanExecute(); find the unique word 0x340016e8 inside that function */
+    .camera_should_move_store        = 0x0332c0d0ULL,   /* patch site in ecl::CameraSystem::OnInputEvent(); the word 0x390512db occurs once in the whole __TEXT segment */
+    .core_input_mode_flag            = 0ULL,          /* unresolved for this build */
 };
 
 static const CameraAddresses kGog = {
     .store = "gog",
-    .camera_get_pitch                 = 0x034eaf64ULL,
-    .aigrid_get_height                = 0x0112ea34ULL,
-    .input_controller_on_event        = 0x02fd711cULL,
-    .get_rotated_input                = 0x0343e730ULL,
-    .get_darkness_component           = 0x01569fbcULL,
-    .game_input_on_event              = 0x02f97ef0ULL,
-    .app_on_input_event               = 0x00c5d124ULL,
-    .input_manager_get_value          = 0x064cdda0ULL,
-    .input_manager_singleton_ptr      = 0x08b1e458ULL,
-    .camera_definition_singleton_ptr  = 0x08b1e690ULL,
-    .movement_unlock_branch           = 0x0343c470ULL,
-    .camera_should_move_store         = 0x03323ff8ULL,
-    .core_input_mode_flag             = 0x08b1e4c0ULL,
+    .camera_get_pitch                = 0x034eaf64ULL,   /* ecl::GameCameraBehavior::GetCameraPitchDegrees(bool, bool) const */
+    .aigrid_get_height               = 0x0112ea34ULL,   /* eoc::AiGrid::GetHeightInArea(Vector3f const&, float) const */
+    .input_controller_on_event       = 0x02fd711cULL,   /* ecl::InputController::OnInputEvent(ls::InputEvent const&) */
+    .get_rotated_input               = 0x0343e730ULL,   /* (anonymous namespace)::GetRotatedInput(short, bool) */
+    .get_darkness_component          = 0x01569fbcULL,   /* ecs::EntityWorld::GetComponent<eoc::DarknessComponent const, true> -- the CONST instantiation; the non-const twin shares its prologue */
+    .game_input_on_event             = 0x02f97ef0ULL,   /* ecl::GameInput::OnInputEvent(ls::InputEvent const&) */
+    .app_on_input_event              = 0x00c5d124ULL,   /* App::OnInputEvent(ls::InputEvent const&) */
+    .input_manager_get_value         = 0x064cdda0ULL,   /* ls::InputManager::GetInputValue(unsigned int const&, ls::EInputPlayerIndex) const */
+    .input_manager_singleton_ptr     = 0x08b1e458ULL,   /* ls::InputManager::m_ptr (__DATA) */
+    .camera_definition_singleton_ptr = 0x08b1e690ULL,   /* EoCGlobalSwitches (__DATA). Symbol is a bare _Global; confirm it by the adrp/ldr pair at GetCameraPitchDegrees+0x20 */
+    .movement_unlock_branch          = 0x0343c470ULL,   /* patch site in ecl::CharacterTask_MoveController::CanExecute(); find the unique word 0x340016e8 inside that function */
+    .camera_should_move_store        = 0x03323ff8ULL,   /* patch site in ecl::CameraSystem::OnInputEvent(); the word 0x390512db occurs once in the whole __TEXT segment */
+    .core_input_mode_flag            = 0x08b1e4c0ULL,   /* _gCore+0x58 (__DATA). Selects which movement task may run: MoveController rejects when 0, MoveInDirection rejects when non-zero */
 };
 
 static const CameraAddresses kUnknown = { .store = "unknown" };
