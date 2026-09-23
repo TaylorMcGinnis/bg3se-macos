@@ -28,6 +28,7 @@
 #include <stdbool.h>
 #include <stdatomic.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define MOVEMENT_UNLOCK_ORIGINAL_7398727      0x340016e8U
@@ -77,8 +78,15 @@ static const uint8_t kSelectorPrologue7398727[] = {
     0xfa, 0x67, 0x18, 0xa9, 0xf8, 0x5f, 0x19, 0xa9
 };
 
+/*
+ * Diagnostic only, and off by default. GetCapabilities is called during normal
+ * play, so installing this unconditionally would put a permanent hook into a
+ * hot game function to answer a question nobody is asking. Set
+ * BG3SE_DEBUG_SELECTOR_PROBE=1 to turn it on.
+ */
 static void selector_probe_install(void) {
     if (g_selector_hooked || INPUT_IS_IN_SELECTOR_MODE_OFFSET_7398727 == 0) return;
+    if (!getenv("BG3SE_DEBUG_SELECTOR_PROBE")) return;
     if (!version_detect_addresses_safe()) return;
     void *base = version_detect_get_binary_base();
     if (!base) return;
