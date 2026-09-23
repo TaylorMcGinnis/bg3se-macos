@@ -21,10 +21,10 @@ extern "C" {
 #endif
 
 /**
- * The game build our addresses were verified against, from
- * src/gen/<store>/build_identity.h (CMake selects it via -DBG3_STORE). All
+ * The game version our addresses were verified against, from
+ * src/gen/build_identity.h; every supported store ships this version. All
  * TypeId addresses, singleton pointers and function offsets in
- * generated_typeids.h and component_typeid.c are for that build.
+ * generated_typeids.h and component_typeid.c are for it.
  *
  * Not the whole identity on its own -- see build_identity.h for why.
  */
