@@ -289,6 +289,12 @@ void lua_input_register(lua_State *L, int ext_table_index);
 /** Persistent modifier and physical-button state observed by the event tap. */
 bool input_caps_lock_active(void);
 
+/**
+ * True when the last deliberate input came from a gamepad, false when it came
+ * from the keyboard or mouse -- the same rule BG3 uses to switch its UI.
+ */
+bool input_controller_mode(void);
+
 /** Enter or leave mod-owned macOS relative-mouse mode. */
 void input_set_relative_mouse_mode(bool enabled);
 

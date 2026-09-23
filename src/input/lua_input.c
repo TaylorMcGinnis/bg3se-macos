@@ -245,6 +245,15 @@ static int lua_input_is_key_pressed(lua_State *L) {
 }
 
 // ============================================================================
+// Ext.Input.GetInputMode() -> "keyboard" | "controller"
+// ============================================================================
+
+static int lua_input_get_input_mode(lua_State *L) {
+    lua_pushstring(L, input_controller_mode() ? "controller" : "keyboard");
+    return 1;
+}
+
+// ============================================================================
 // Ext.Input.GetModifiers()
 // ============================================================================
 
@@ -386,6 +395,9 @@ void lua_input_register(lua_State *L, int ext_table_index) {
 
     lua_pushcfunction(L, lua_input_get_modifiers);
     lua_setfield(L, -2, "GetModifiers");
+
+    lua_pushcfunction(L, lua_input_get_input_mode);
+    lua_setfield(L, -2, "GetInputMode");
 
     lua_pushcfunction(L, lua_input_is_initialized);
     lua_setfield(L, -2, "IsInitialized");

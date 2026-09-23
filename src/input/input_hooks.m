@@ -12,6 +12,7 @@
 
 #import <AppKit/AppKit.h>
 #import <Carbon/Carbon.h>
+#import <GameController/GameController.h>
 #import <pthread.h>
 #include <stdatomic.h>
 
@@ -121,6 +122,10 @@ static CGEventRef event_tap_callback(CGEventTapProxy proxy, CGEventType type,
                                      CGEventRef event, void *refcon);
 static bool check_hotkeys(uint16_t keyCode, uint32_t modifiers);
 static uint32_t convert_cg_modifiers(CGEventFlags flags);
+static void mark_input_mode(bool controller);
+
+#define CONTROLLER_DEADZONE   0.35f   /* stick travel that counts as controller use */
+#define MOUSE_MOVE_THRESHOLD  3       /* pixels; ignores sensor jitter */
 
 // ============================================================================
 // CGEventTap Callback
@@ -177,6 +182,28 @@ static CGEventRef event_tap_callback(CGEventTapProxy proxy, CGEventType type,
             double deltaY = CGEventGetDoubleValueField(event, kCGScrollWheelEventDeltaAxis1);
             imgui_metal_process_scroll((float)deltaX, (float)deltaY);
             camera_input_scroll(deltaY);
+            break;
+        }
+        default:
+            break;
+    }
+
+    // Any deliberate keyboard or mouse use puts the game back in keyboard mode.
+    switch (type) {
+        case kCGEventKeyDown:
+        case kCGEventLeftMouseDown:
+        case kCGEventRightMouseDown:
+        case kCGEventOtherMouseDown:
+        case kCGEventScrollWheel:
+            mark_input_mode(false);
+            break;
+        case kCGEventMouseMoved:
+        case kCGEventLeftMouseDragged:
+        case kCGEventRightMouseDragged:
+        case kCGEventOtherMouseDragged: {
+            int64_t dx = CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
+            int64_t dy = CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
+            if (llabs(dx) + llabs(dy) >= MOUSE_MOVE_THRESHOLD) mark_input_mode(false);
             break;
         }
         default:
@@ -328,6 +355,74 @@ static bool check_hotkeys(uint16_t keyCode, uint32_t modifiers) {
 }
 
 // ============================================================================
+// Input mode (keyboard vs controller)
+// ============================================================================
+
+// BG3 switches between its keyboard and controller UI on whichever device was
+// used last. Mods that only suit one of them (the immersive camera fights the
+// controller's own camera) need the same answer, so track it here: the event
+// tap marks keyboard use, and a poll of the gamepad marks controller use.
+//
+// Polled rather than hooked: GCController elements carry a single
+// valueChangedHandler, and setting one would replace any the game installed.
+static _Atomic(bool) s_controller_mode = false;
+static dispatch_source_t s_controller_poll_timer;
+
+static void mark_input_mode(bool controller) {
+    bool was = atomic_exchange_explicit(&s_controller_mode, controller,
+                                        memory_order_acq_rel);
+    if (was != controller) {
+        LOG_INPUT_INFO("Input mode: %s", controller ? "controller" : "keyboard");
+    }
+}
+
+static bool gamepad_active(GCExtendedGamepad *pad) {
+    for (GCControllerButtonInput *b in @[pad.buttonA, pad.buttonB, pad.buttonX, pad.buttonY,
+                                         pad.leftShoulder, pad.rightShoulder,
+                                         pad.leftTrigger, pad.rightTrigger,
+                                         pad.dpad.up, pad.dpad.down, pad.dpad.left, pad.dpad.right,
+                                         pad.buttonMenu]) {
+        if (b.pressed) return true;
+    }
+    if (pad.buttonOptions.pressed || pad.leftThumbstickButton.pressed ||
+        pad.rightThumbstickButton.pressed) return true;
+    for (GCControllerDirectionPad *stick in @[pad.leftThumbstick, pad.rightThumbstick]) {
+        if (fabsf(stick.xAxis.value) > CONTROLLER_DEADZONE ||
+            fabsf(stick.yAxis.value) > CONTROLLER_DEADZONE) return true;
+    }
+    return false;
+}
+
+static void poll_controller_activity(void) {
+    if (atomic_load_explicit(&s_controller_mode, memory_order_relaxed)) return;
+    for (GCController *c in GCController.controllers) {
+        GCExtendedGamepad *pad = c.extendedGamepad;
+        if (pad && gamepad_active(pad)) { mark_input_mode(true); return; }
+    }
+}
+
+static void start_controller_poll(void) {
+    if (s_controller_poll_timer) return;
+    s_controller_poll_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                                                     dispatch_get_main_queue());
+    dispatch_source_set_timer(s_controller_poll_timer, DISPATCH_TIME_NOW,
+                              50 * NSEC_PER_MSEC, 10 * NSEC_PER_MSEC);
+    dispatch_source_set_event_handler(s_controller_poll_timer, ^{ poll_controller_activity(); });
+    dispatch_resume(s_controller_poll_timer);
+}
+
+static void stop_controller_poll(void) {
+    if (!s_controller_poll_timer) return;
+    dispatch_source_cancel(s_controller_poll_timer);
+    dispatch_release(s_controller_poll_timer);   /* not ARC: balance the create */
+    s_controller_poll_timer = NULL;
+}
+
+bool input_controller_mode(void) {
+    return atomic_load_explicit(&s_controller_mode, memory_order_acquire);
+}
+
+// ============================================================================
 // Public API - Initialization
 // ============================================================================
 
@@ -430,6 +525,8 @@ bool input_init(void) {
     s_initialized = true;
     LOG_INPUT_INFO("Input system initialized (CGEventTap active)");
 
+    start_controller_poll();
+
     return true;
 }
 
@@ -439,6 +536,8 @@ void input_shutdown(void) {
     }
 
     LOG_INPUT_INFO("Shutting down input system...");
+
+    stop_controller_poll();
 
     // Remove from run loop and release
     if (s_run_loop_source) {
