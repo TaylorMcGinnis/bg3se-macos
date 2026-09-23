@@ -28,6 +28,11 @@ static const char *const kCharacterKeys[4] = {
     "CharacterMoveForward", "CharacterMoveBackward",
     "CharacterMoveLeft", "CharacterMoveRight"
 };
+/* The game's controller defaults for the same four actions (controller_1.json). */
+static const char *const kCharacterStick[4] = {
+    "c:leftstick_ypos", "c:leftstick_yneg",
+    "c:leftstick_xneg", "c:leftstick_xpos"
+};
 
 /* Skip a JSON string literal starting at *p (which points at the quote). */
 static const char *skip_string(const char *p, const char *end) {
@@ -120,6 +125,42 @@ char *inputconfig_filter_keyboard_entries(const char *arr, size_t len) {
         free(out);
         return NULL;
     }
+    return out;
+}
+
+/*
+ * The copy above is keyboard only, but the character array it replaces also
+ * carries the left-stick binding. Writing the array at all overrides the game's
+ * controller default, so dropping those entries left controllers unable to move
+ * the character. Keep the player's own controller entries; if there are none,
+ * put back the game's default so earlier rewrites heal.
+ */
+char *inputconfig_keep_controller_entries(const char *keys, const char *existing,
+                                          size_t existing_len, const char *fallback) {
+    size_t keys_len = strlen(keys);
+    size_t cap = keys_len + existing_len * 2 + strlen(fallback) + 16;
+    char *out = malloc(cap);
+    if (!out) return NULL;
+    memcpy(out, keys, keys_len - 1);                /* drop the closing ']' */
+    size_t w = keys_len - 1;
+    bool kept = false;
+
+    const char *p = existing, *end = existing + existing_len;
+    while (p < end) {
+        if (*p != '"') { p++; continue; }
+        const char *s = p;
+        p = skip_string(p, end);
+        size_t slen = (size_t)(p - s);              /* includes both quotes */
+        if (slen < 5 || strncmp(s + 1, "c:", 2) != 0) continue;
+        out[w++] = ','; out[w++] = ' ';
+        memcpy(out + w, s, slen); w += slen;
+        kept = true;
+    }
+    if (!kept) {
+        w += (size_t)snprintf(out + w, cap - w, ", \"%s\"", fallback);
+    }
+    out[w++] = ']';
+    out[w] = '\0';
     return out;
 }
 
@@ -268,6 +309,12 @@ bool inputconfig_patch_movement(void) {
             LOG_INPUT_DEBUG("[InputConfig] %s absent; skipped", kCharacterKeys[i]);
             continue;
         }
+
+        char *merged = inputconfig_keep_controller_entries(want, buf + ts, te - ts,
+                                                           kCharacterStick[i]);
+        free(want);
+        if (!merged) break;
+        want = merged;
 
         size_t want_len = strlen(want);
         if (want_len == te - ts && memcmp(buf + ts, want, want_len) == 0) {

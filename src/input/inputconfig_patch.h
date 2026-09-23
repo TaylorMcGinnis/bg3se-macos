@@ -40,4 +40,12 @@ bool inputconfig_find_key_array(const char *buf, size_t len, const char *key,
  */
 char *inputconfig_filter_keyboard_entries(const char *arr, size_t len);
 
+/**
+ * Append the controller ("c:") entries of the existing character array to the
+ * keyboard array `keys`. When the existing array has none, append `fallback`
+ * (the game's default stick binding) instead. Caller frees.
+ */
+char *inputconfig_keep_controller_entries(const char *keys, const char *existing,
+                                          size_t existing_len, const char *fallback);
+
 #endif

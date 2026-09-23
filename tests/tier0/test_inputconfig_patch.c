@@ -144,6 +144,49 @@ TEST(brackets_inside_strings_do_not_confuse_the_scan) {
     free(got);
 }
 
+/* ---------------------------------------------------------------- */
+/* Keeping the controller binding on the character action            */
+/* ---------------------------------------------------------------- */
+
+static char *keep_for(const char *keys, const char *existing) {
+    return inputconfig_keep_controller_entries(keys, existing, strlen(existing), "c:leftstick_ypos");
+}
+
+/*
+ * Regression. The character array was replaced with keyboard entries only.
+ * Writing it overrides the game's controller default, so a controller could
+ * navigate menus but no longer move the character.
+ */
+TEST(keeps_the_players_controller_entries) {
+    char *got = keep_for("[\"key:w\"]", "[\"key:t\", \"c:leftstick_ypos\", \"c:dpad_up\"]");
+    ASSERT_TRUE(got != NULL);
+    ASSERT_STR_EQ(got, "[\"key:w\", \"c:leftstick_ypos\", \"c:dpad_up\"]");
+    free(got);
+}
+
+/* A file an earlier build already stripped gets the game's default back. */
+TEST(restores_the_default_stick_when_none_is_left) {
+    char *got = keep_for("[\"key:w\", \"key:up\"]", "[\"key:w\", \"key:up\"]");
+    ASSERT_TRUE(got != NULL);
+    ASSERT_STR_EQ(got, "[\"key:w\", \"key:up\", \"c:leftstick_ypos\"]");
+    free(got);
+
+    char *empty = keep_for("[\"key:w\"]", "[]");
+    ASSERT_TRUE(empty != NULL);
+    ASSERT_STR_EQ(empty, "[\"key:w\", \"c:leftstick_ypos\"]");
+    free(empty);
+}
+
+/* The result is stable, so the patch does not rewrite the file every launch. */
+TEST(keeping_is_idempotent) {
+    char *once = keep_for("[\"key:w\"]", "[]");
+    ASSERT_TRUE(once != NULL);
+    char *twice = keep_for("[\"key:w\"]", once);
+    ASSERT_TRUE(twice != NULL);
+    ASSERT_STR_EQ(twice, once);
+    free(once); free(twice);
+}
+
 void register_inputconfig_patch_tests(void) {
     RUN_TEST(finds_the_named_array);
     RUN_TEST(does_not_match_a_longer_key);
@@ -154,4 +197,7 @@ void register_inputconfig_patch_tests(void) {
     RUN_TEST(refuses_to_produce_an_empty_binding);
     RUN_TEST(survives_more_bindings_than_the_old_buffer_held);
     RUN_TEST(brackets_inside_strings_do_not_confuse_the_scan);
+    RUN_TEST(keeps_the_players_controller_entries);
+    RUN_TEST(restores_the_default_stick_when_none_is_left);
+    RUN_TEST(keeping_is_idempotent);
 }
