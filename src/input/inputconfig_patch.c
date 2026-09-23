@@ -1,12 +1,12 @@
 /**
  * inputconfig_patch.c - point character movement at the camera bindings.
  *
- * The edit is deliberately narrow. It reads four "Camera*" arrays and writes
- * them to the matching "CharacterMove*" arrays. It does not reformat or
- * reorder anything else, so BG3 keeps ownership of the file's shape.
+ * The edit is deliberately narrow: each "CharacterMove*" array gets the keys
+ * of its "Camera*" counterpart plus its own controller entries. Nothing else
+ * is reformatted or reordered, so BG3 keeps ownership of the file's shape.
  *
- * A full JSON parser is not used on purpose: the only parser in this tree
- * builds Lua values, and this runs before Lua exists.
+ * No JSON parser: the only one in this tree builds Lua values, and this runs
+ * before Lua exists.
  */
 
 #include "inputconfig_patch.h"
@@ -44,10 +44,7 @@ static const char *skip_string(const char *p, const char *end) {
     return (p < end) ? p + 1 : end;
 }
 
-/*
- * Find "key" : [ ... ] and return the span of the array, brackets included.
- * Quoted text is skipped so a bracket inside a string cannot confuse this.
- */
+/* Quoted text is skipped so a bracket inside a string cannot end the array. */
 bool inputconfig_find_key_array(const char *buf, size_t len, const char *key,
                            size_t *out_start, size_t *out_end) {
     char needle[128];
@@ -80,17 +77,9 @@ bool inputconfig_find_key_array(const char *buf, size_t len, const char *key,
     return false;
 }
 
-/*
- * Rebuild an array body, keeping only usable keyboard entries.
- * Controller entries and the engine's unbound sentinels are dropped: the
- * character action only needs the keys.
- */
 char *inputconfig_filter_keyboard_entries(const char *arr, size_t len) {
-    /*
-     * Twice the input, not len + 8. Each separator is written as ", " while
-     * the source may hold only ",", so the result can grow by one byte per
-     * entry. len + 8 overflowed past eight bindings.
-     */
+    /* Separators are written as ", " where the source may have ",", so the
+     * result can outgrow the input by a byte per entry. */
     size_t cap = len * 2 + 8;
     char *out = malloc(cap);
     if (!out) return NULL;
@@ -115,12 +104,8 @@ char *inputconfig_filter_keyboard_entries(const char *arr, size_t len) {
     out[w++] = ']';
     out[w] = '\0';
 
-    /*
-     * Refuse to write an empty binding. If the player has unbound the camera
-     * keys, or bound them to a controller only, copying the empty result would
-     * clear character movement and leave no way back except rebinding the
-     * camera. Leaving the previous value alone is the safer failure.
-     */
+    /* An empty result would clear character movement, which the Options
+     * screen cannot restore; leave the previous value alone instead. */
     if (first) {
         free(out);
         return NULL;
@@ -128,13 +113,8 @@ char *inputconfig_filter_keyboard_entries(const char *arr, size_t len) {
     return out;
 }
 
-/*
- * The copy above is keyboard only, but the character array it replaces also
- * carries the left-stick binding. Writing the array at all overrides the game's
- * controller default, so dropping those entries left controllers unable to move
- * the character. Keep the player's own controller entries; if there are none,
- * put back the game's default so earlier rewrites heal.
- */
+/* Writing the character array overrides the game's controller default, so the
+ * stick binding must be carried over or the controller cannot move. */
 char *inputconfig_keep_controller_entries(const char *keys, const char *existing,
                                           size_t existing_len, const char *fallback) {
     size_t keys_len = strlen(keys);
@@ -229,11 +209,9 @@ static bool find_inputconfig(char *out, size_t out_size) {
 }
 
 /*
- * The mod ships as a .pak, so an unpacked folder is no longer proof of
- * anything. Ask the load order instead: modsettings.lsx names the mod only
- * when the player has actually enabled it, which is the permission we want
- * before touching their bindings. The unpacked folder is still accepted, for
- * anyone running the mod from a working copy.
+ * Only touch the player's bindings when they have enabled the mod, i.e. when
+ * modsettings.lsx names it. An unpacked mod folder also counts, for working
+ * copies.
  */
 static bool movement_mod_installed(void) {
     const char *home = getenv("HOME");

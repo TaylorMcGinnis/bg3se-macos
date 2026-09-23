@@ -8,7 +8,7 @@
 
 #include "camera_system.h"
 
-/* Per-store hook targets; -DBG3_STORE selects src/gen/<store>/. */
+/* Per-store hook targets, selected at runtime. */
 #include "camera_addresses.h"
 
 #include "component_lookup.h"

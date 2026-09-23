@@ -4,15 +4,15 @@
  * BG3 already owns the complete direct-movement path. Keyboard bindings for
  * CharacterMoveForward/Backward/Left/Right reach that path, but
  * CharacterTask_MoveController::CanExecute() rejects it while the UI is in
- * keyboard/mouse mode. This module neutralizes that guard and changes the
- * camera input handler's should_move store from 1 to 0, preventing the same
- * W/A/S/D input from panning the map camera. It does not set controller mode,
- * synthesize controller input, or alter the UI.
+ * keyboard/mouse mode. This module neutralizes that guard, sets the engine's
+ * direct-movement switch, and changes the camera input handler's should_move
+ * store from 1 to 0 so the same W/A/S/D input does not pan the map camera. It
+ * does not set controller mode, synthesize controller input, or alter the UI.
  */
 
 #include "movement_system.h"
 
-/* Per-store patch sites; -DBG3_STORE selects src/gen/<store>/. */
+/* Per-store patch sites, selected at runtime. */
 #include "camera_addresses.h"
 
 #include "../core/safe_memory.h"
@@ -35,9 +35,9 @@
 #define CAMERA_SHOULD_MOVE_BLOCKED_7398727      0x390512dfU
 #define ARM64_NOP                             0xd503201fU
 
-/* CanExecute loads EoCGlobalSwitches then tests the dword at this offset; when
- * it is zero the whole GetRotatedInput path is skipped, so direct movement can
- * never engage regardless of the CanExecute patch. */
+/* EoCGlobalSwitches dword that CanExecute tests before calling GetRotatedInput.
+ * While it is zero the call is skipped, so the guard patch alone cannot move
+ * the character. */
 #define GLOBAL_SWITCH_DIRECT_MOVE_OFFSET      0xe98
 
 /* Requested remains true while combat temporarily restores vanilla behavior. */
@@ -110,13 +110,8 @@ static bool movement_set_patch_state(bool enabled) {
     }
 
     if (enabled) {
-        /*
-         * CanExecute loads EoCGlobalSwitches and branches past GetRotatedInput
-         * when the dword at +0xe98 is zero, so the CanExecute patch alone can
-         * never produce movement: the call is skipped, not rejected. Measured
-         * zero on this install. Setting the engine's own switch is preferred
-         * over patching the branch -- it is the value the engine already reads.
-         */
+        /* Set the switch (see GLOBAL_SWITCH_DIRECT_MOVE_OFFSET) rather than
+         * patch the branch: it is the value the engine already reads. */
         uint32_t *sw = direct_move_switch_address();
         if (sw) {
             uint32_t cur = 0;

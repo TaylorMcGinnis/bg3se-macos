@@ -409,10 +409,8 @@ void *component_lookup_by_index_in_world(void *entityWorld, uint64_t entityHandl
     // Component type indices are global (ecs::ComponentTypeIdContext), so the
     // same TypeId resolves in any world; only the storage container differs.
     //
-    // The cached world was validated at init and can be dereferenced directly.
-    // Any other world came from the caller and may be stale -- the camera
-    // passes one during session load -- so read it the safe way. The same
-    // pattern crashed storage_container_for_world (SIGSEGV, 2026-09-19).
+    // The cached world was validated at init. Any other world came from the
+    // caller and may be stale (see storage_container_for_world).
     void *storageContainer = NULL;
     if (entityWorld == g_EntityWorld) {
         storageContainer = g_StorageContainer;
@@ -709,11 +707,8 @@ int component_lookup_get_all_entities(uint64_t *outHandles, int maxHandles) {
     return totalCount;
 }
 
-/*
- * Shared body: the camera needs to enumerate in a specific EntityWorld (the
- * client's), not whichever world was cached at init, so the container is a
- * parameter and the two public entry points below choose it.
- */
+/* The container is a parameter so callers can enumerate a specific world
+ * (the camera needs the client's), not only the one cached at init. */
 static int get_all_with_component_from_container(void *container,
                                                  uint16_t componentTypeIndex,
                                                  uint64_t *outHandles,
@@ -725,8 +720,7 @@ static int get_all_with_component_from_container(void *container,
     // Check if this is a one-frame component (bit 15 set)
     bool isOneFrame = is_oneframe_component(componentTypeIndex);
 
-    // Get Entities array from StorageContainer. The container may have come
-    // from a caller-supplied world, so validate before walking it.
+    // The container may belong to a caller-supplied world; validate it.
     GenericArray *entities = storage_container_get_entities(container);
     if (!entities) {
         LOG_ENTITY_DEBUG("GetAllWithComponent: no entities array for container %p",
@@ -804,11 +798,9 @@ static int get_all_with_component_from_container(void *container,
 }
 
 /*
- * The world pointer comes from the caller, not from our own init, so it can be
- * stale or not yet populated during session load. Read it the way the rest of
- * this file does: a raw dereference here crashed the game inside
- * storage_data_get_component_slot after iterating a garbage container
- * (SIGSEGV, 2026-09-19).
+ * A caller-supplied world can be stale or half-built during session load, so
+ * read it with safe_memory: a raw dereference here once walked a garbage
+ * container and crashed.
  */
 static void *storage_container_for_world(void *entityWorld) {
     if (!component_lookup_ready() || !entityWorld) return NULL;

@@ -502,9 +502,8 @@ if(BUILD_TESTS)
         src/lua/lua_persistentvars.c
         src/vars/campaign_key.c
     )
-    # A heap overrun is silent without this: the buffer-sizing regression test
-    # passes under a normal build even with the bug reintroduced, because malloc
-    # rounds the allocation up. Run with -DBG3SE_TEST_ASAN=ON to make it real.
+    # Heap overruns are silent without a sanitizer (malloc rounds up), so the
+    # buffer-sizing test only fails under -DBG3SE_TEST_ASAN=ON.
     if(BG3SE_TEST_ASAN)
         target_compile_options(bg3se_test_tier0 PRIVATE -fsanitize=address -g)
         target_link_options(bg3se_test_tier0 PRIVATE -fsanitize=address)

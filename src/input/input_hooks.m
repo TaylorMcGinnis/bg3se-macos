@@ -167,9 +167,8 @@ static CGEventRef event_tap_callback(CGEventTapProxy proxy, CGEventType type,
         case kCGEventLeftMouseDragged:
         case kCGEventRightMouseDragged:
         case kCGEventOtherMouseDragged:
-            // CGEventTap is the ONLY reliable input source for SDL games
-            // NSView swizzling doesn't receive events from SDL. Middle-button
-            // dragging arrives as OtherMouseDragged on macOS.
+            // The tap is the only reliable source of mouse movement in BG3.
+            // Middle-button drags arrive as OtherMouseDragged.
             imgui_metal_process_mouse_move((float)screenLoc.x, (float)screenLoc.y);
             camera_input_mouse_delta(
                 (double)CGEventGetIntegerValueField(event,
@@ -358,13 +357,11 @@ static bool check_hotkeys(uint16_t keyCode, uint32_t modifiers) {
 // Input mode (keyboard vs controller)
 // ============================================================================
 
-// BG3 switches between its keyboard and controller UI on whichever device was
-// used last. Mods that only suit one of them (the immersive camera fights the
-// controller's own camera) need the same answer, so track it here: the event
-// tap marks keyboard use, and a poll of the gamepad marks controller use.
-//
-// Polled rather than hooked: GCController elements carry a single
-// valueChangedHandler, and setting one would replace any the game installed.
+// BG3 switches its UI to whichever device was used last; mods that suit only
+// one (the immersive camera) need the same answer. The event tap marks
+// keyboard use and a gamepad poll marks controller use. Polled, not hooked: a
+// GCController element has one valueChangedHandler, and setting it would
+// replace the game's.
 static _Atomic(bool) s_controller_mode = false;
 static dispatch_source_t s_controller_poll_timer;
 

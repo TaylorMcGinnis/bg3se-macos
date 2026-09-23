@@ -286,7 +286,7 @@ void lua_input_register(lua_State *L, int ext_table_index);
 #define kVK_ANSI_Slash        0x2C
 
 
-/** Persistent modifier and physical-button state observed by the event tap. */
+/** True while Caps Lock is on, as seen by the event tap. */
 bool input_caps_lock_active(void);
 
 /**

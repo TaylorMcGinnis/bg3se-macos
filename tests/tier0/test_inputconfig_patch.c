@@ -1,15 +1,12 @@
 /*
  * Tier 0 tests: inputconfig_patch.c -- the camera-to-character binding copy.
  *
- * BG3 ships CharacterMoveForward and its siblings unbound and offers no UI to
- * bind them, so the extender derives them from the camera bindings. That means
- * it rewrites a file the player owns, and two of its failure modes are silent:
- * a buffer that overruns on a long binding list, and an empty result that would
- * clear movement with no way back through the Options screen.
+ * The patch rewrites a file the player owns, and its failure modes are silent:
+ * a buffer overrun on a long binding list, an empty result that clears
+ * movement, and a controller left unable to move the character.
  *
- * The helpers are exposed in the header and this links the real object. An
- * earlier version included the .c instead; CMake did not track that as a
- * dependency, so a deliberately reintroduced bug still reported PASS.
+ * Links the real object rather than including the .c, so CMake rebuilds the
+ * test when the source changes.
  */
 
 #include "test_harness.h"
@@ -45,8 +42,8 @@ TEST(finds_the_named_array) {
     ASSERT_EQ(FOUR_KEYS[e - 1], ']');
 }
 
-/* "CameraForward" is a prefix of "PhotoModeCameraForward" only in the other
- * direction, but a sloppy search would match the longer key's suffix. */
+/* "PhotoModeCameraForward" ends with "CameraForward"; a suffix match must not
+ * find it. */
 TEST(does_not_match_a_longer_key) {
     size_t s = 0, e = 0;
     ASSERT_TRUE(inputconfig_find_key_array(FOUR_KEYS, strlen(FOUR_KEYS), "PhotoModeCameraForward", &s, &e));
@@ -106,14 +103,9 @@ TEST(refuses_to_produce_an_empty_binding) {
 }
 
 /*
- * Regression. The output buffer was sized len + 8. Separators are written as
- * ", " while the source may hold only ",", so the result grows by a byte per
- * entry and overran past eight bindings.
- *
- * This case only bites under a sanitizer: malloc rounds the allocation up, so
- * a normal build still reports PASS with the bug reintroduced. Verified with
- * -DBG3SE_TEST_ASAN=ON, which reports heap-buffer-overflow in
- * inputconfig_filter_keyboard_entries.
+ * Regression: the output buffer was sized len + 8 and overran past eight
+ * bindings. Only fails under -DBG3SE_TEST_ASAN=ON; malloc's rounding hides the
+ * overrun in a normal build.
  */
 TEST(survives_more_bindings_than_the_old_buffer_held) {
     char json[1024];

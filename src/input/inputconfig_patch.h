@@ -13,21 +13,17 @@
  * camera bindings are the ones a player can edit, so those are the source.
  * This mirrors what Ch4nKyy's BG3WASD does on Windows.
  *
- * Runs from the dylib constructor, before BG3 reads the file. A hook would be
- * installed too late for the first load.
+ * Keeps each action's controller entries, restoring the default stick binding
+ * if none remain, so controllers can still move the character.
  *
- * Does nothing unless a mod that wants keyboard movement is installed.
- * Returns true when the file was rewritten.
+ * Runs from the dylib constructor, before BG3 reads the file; a hook would
+ * install too late for the first load. Does nothing unless a mod that wants
+ * keyboard movement is enabled. Returns true when the file was rewritten.
  */
 bool inputconfig_patch_movement(void);
 
 
-/*
- * Exposed for tests only. These carry the two failure modes worth pinning: a
- * result longer than its source, and an empty result that must not be written
- * over a player's bindings. The test links this object rather than including
- * the .c, so the dependency is one CMake actually tracks.
- */
+/* Exposed for tests (tests/tier0/test_inputconfig_patch.c). */
 
 /** Locate "key" : [ ... ] and return the span of the array, brackets included. */
 bool inputconfig_find_key_array(const char *buf, size_t len, const char *key,
